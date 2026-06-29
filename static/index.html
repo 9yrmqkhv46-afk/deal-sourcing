@@ -3,96 +3,216 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TransformBiz - Deal-Sourcing &amp; CRM Enrichment</title>
+  <title>TransformBiz — Deal Sourcing &amp; CRM Enrichment</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <!-- ===================== Header ===================== -->
   <header class="app-header">
     <div class="brand">
-      <span class="brand-mark">TB</span>
-      <div>
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26" fill="none">
+          <path d="M4 22l7-8 5 5 8-11" stroke="currentColor" stroke-width="2.6"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="24" cy="8" r="2.4" fill="currentColor"/>
+        </svg>
+      </span>
+      <div class="brand-text">
         <h1>TransformBiz</h1>
-        <p class="subtitle">Deal-Sourcing &amp; CRM Enrichment Agent</p>
+        <p class="subtitle">Deal Sourcing &amp; CRM Enrichment</p>
       </div>
     </div>
-    <div class="actions">
-      <button id="load-sample" class="btn btn-primary">Load sample data</button>
-      <button id="run-batch" class="btn">Process batch</button>
+
+    <div class="toolbar" role="toolbar" aria-label="Dashboard actions">
+      <button id="load-sample" class="btn btn-primary" type="button">
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.2-3.2M10 12l3.2-3.2M4 15h12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Load sample data
+      </button>
+      <button id="open-process" class="btn" type="button">
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4l11 6-11 6V4z" fill="currentColor"/></svg>
+        Process batch…
+      </button>
+      <button id="export-json" class="btn" type="button">
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V4m0 9l-3-3m3 3l3-3M4 16h12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Export JSON
+      </button>
+      <button id="toggle-raw" class="btn btn-ghost" type="button" aria-pressed="false">
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 6l-4 4 4 4M13 6l4 4-4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        View raw JSON
+      </button>
     </div>
   </header>
 
-  <main>
-    <section class="input-panel">
-      <details>
-        <summary>Batch input (JSON array of source items)</summary>
-        <textarea id="batch-input" spellcheck="false"
-          placeholder='[{"source_name": "scaling.com.au", "source_type": "marketplace", "raw_text": "..."}]'></textarea>
-        <p id="status" class="status"></p>
-      </details>
-    </section>
-
-    <section id="summary-cards" class="summary-cards" hidden>
-      <div class="card card-core">
-        <span class="card-label">Core thesis</span>
-        <span class="card-value" id="count-core">0</span>
+  <main id="main">
+    <!-- ===================== KPI summary ===================== -->
+    <section id="kpi-row" class="kpi-row" hidden aria-label="Summary metrics">
+      <div class="kpi kpi-core">
+        <div class="kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><path d="M5 10.5l3 3 7-7.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="kpi-body"><span class="kpi-label">Core thesis</span><span class="kpi-value" id="kpi-core">0</span></div>
       </div>
-      <div class="card card-adjacent">
-        <span class="card-label">Adjacent thesis</span>
-        <span class="card-value" id="count-adjacent">0</span>
+      <div class="kpi kpi-adjacent">
+        <div class="kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><path d="M10 3v7l4 2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+        </div>
+        <div class="kpi-body"><span class="kpi-label">Adjacent</span><span class="kpi-value" id="kpi-adjacent">0</span></div>
       </div>
-      <div class="card card-reject">
-        <span class="card-label">Reject</span>
-        <span class="card-value" id="count-reject">0</span>
+      <div class="kpi kpi-reject">
+        <div class="kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+        </div>
+        <div class="kpi-body"><span class="kpi-label">Reject</span><span class="kpi-value" id="kpi-reject">0</span></div>
       </div>
-      <div class="card card-total">
-        <span class="card-label">Total deals</span>
-        <span class="card-value" id="count-total">0</span>
+      <div class="kpi kpi-total">
+        <div class="kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M3 8h14" stroke="currentColor" stroke-width="1.6"/></svg>
+        </div>
+        <div class="kpi-body"><span class="kpi-label">Total deals</span><span class="kpi-value" id="kpi-total">0</span></div>
       </div>
-    </section>
-
-    <section id="deals-section" class="panel" hidden>
-      <div class="panel-head">
-        <h2>Deals</h2>
-        <div id="filter-chips" class="chips"></div>
+      <div class="kpi kpi-contacts">
+        <div class="kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M4 16c0-3 2.7-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+        </div>
+        <div class="kpi-body"><span class="kpi-label">Contacts</span><span class="kpi-value" id="kpi-contacts">0</span></div>
       </div>
-      <div class="table-wrap">
-        <table id="deals-table">
-          <thead>
-            <tr>
-              <th data-sort="title">Title</th>
-              <th data-sort="company">Company</th>
-              <th data-sort="source_type">Source</th>
-              <th data-sort="deal_size_bucket">Size</th>
-              <th data-sort="overall_score" class="sortable active">Score &#9660;</th>
-              <th data-sort="classification">Classification</th>
-            </tr>
-          </thead>
-          <tbody id="deals-body"></tbody>
-        </table>
+      <div class="kpi kpi-chart">
+        <div id="donut" class="donut" aria-hidden="true"></div>
+        <div class="kpi-body">
+          <span class="kpi-label">Score mix</span>
+          <div class="legend" id="donut-legend"></div>
+        </div>
       </div>
     </section>
 
-    <div class="grid-2">
-      <section id="companies-section" class="panel" hidden>
-        <div class="panel-head"><h2>Companies</h2></div>
-        <ul id="companies-list" class="entity-list"></ul>
-      </section>
+    <!-- ===================== Raw JSON ===================== -->
+    <section id="raw-panel" class="card raw-panel" hidden>
+      <div class="raw-head"><h2>Raw JSON output</h2><span class="muted">strict contract: deals · companies · founders · contacts · summary</span></div>
+      <pre id="raw-json" tabindex="0"></pre>
+    </section>
 
-      <section id="founders-section" class="panel" hidden>
-        <div class="panel-head"><h2>Founders &amp; Key People</h2></div>
-        <ul id="founders-list" class="entity-list"></ul>
-      </section>
-    </div>
+    <!-- ===================== Tabs ===================== -->
+    <nav class="tabs" role="tablist" aria-label="Result views">
+      <button class="tab active" role="tab" aria-selected="true" data-tab="deals" id="tab-deals">Deals</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="companies" id="tab-companies">Companies</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="founders" id="tab-founders">Founders</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="contacts" id="tab-contacts">Top Contacts</button>
+    </nav>
 
-    <section id="contacts-section" class="panel" hidden>
-      <div class="panel-head"><h2>Top contacts for outreach</h2></div>
-      <ul id="contacts-list" class="contact-list"></ul>
+    <!-- ===================== Deals view ===================== -->
+    <section id="view-deals" class="view" role="tabpanel" aria-labelledby="tab-deals">
+      <div class="controls card">
+        <div class="search-wrap">
+          <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.5 13.5L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <input id="search" type="search" placeholder="Search title, company or sector…" aria-label="Search deals" />
+        </div>
+        <label class="ctl">Classification
+          <select id="f-class" aria-label="Filter by classification">
+            <option value="all">All</option>
+            <option value="core_thesis">Core thesis</option>
+            <option value="adjacent_thesis">Adjacent</option>
+            <option value="reject">Reject</option>
+          </select>
+        </label>
+        <label class="ctl">Source
+          <select id="f-source" aria-label="Filter by source type"><option value="all">All</option></select>
+        </label>
+        <label class="ctl">Sector
+          <select id="f-sector" aria-label="Filter by sector"><option value="all">All</option></select>
+        </label>
+        <label class="ctl ctl-range">Min score <span id="score-out" class="score-out">0</span>
+          <input id="f-score" type="range" min="0" max="100" value="0" aria-label="Minimum score" />
+        </label>
+        <label class="toggle"><input id="f-franchise" type="checkbox" /> <span>Franchise only</span></label>
+        <label class="toggle"><input id="f-hide-stale" type="checkbox" /> <span>Hide stale</span></label>
+        <span class="result-count" id="result-count"></span>
+      </div>
+
+      <div class="card table-card">
+        <div class="table-wrap">
+          <table id="deals-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="title" scope="col">Title</th>
+                <th class="sortable" data-sort="company" scope="col">Company</th>
+                <th class="sortable" data-sort="sector" scope="col">Sector</th>
+                <th scope="col">Location</th>
+                <th class="sortable" data-sort="deal_size_bucket" scope="col">Size</th>
+                <th class="sortable active" data-sort="overall_score" scope="col">Score</th>
+                <th class="sortable" data-sort="classification" scope="col">Class</th>
+                <th scope="col">Filters</th>
+                <th scope="col">Source</th>
+              </tr>
+            </thead>
+            <tbody id="deals-body"></tbody>
+          </table>
+        </div>
+        <div id="deals-empty" class="empty-state" hidden>No deals match the current filters.</div>
+      </div>
+    </section>
+
+    <!-- ===================== Companies view ===================== -->
+    <section id="view-companies" class="view" role="tabpanel" aria-labelledby="tab-companies" hidden>
+      <div id="companies-grid" class="card-grid"></div>
+      <div id="companies-empty" class="empty-state" hidden>No companies.</div>
+    </section>
+
+    <!-- ===================== Founders view ===================== -->
+    <section id="view-founders" class="view" role="tabpanel" aria-labelledby="tab-founders" hidden>
+      <div id="founders-grid" class="card-grid"></div>
+      <div id="founders-empty" class="empty-state" hidden>No founders or key people captured.</div>
+    </section>
+
+    <!-- ===================== Contacts view ===================== -->
+    <section id="view-contacts" class="view" role="tabpanel" aria-labelledby="tab-contacts" hidden>
+      <p class="view-intro">Prioritised intermediaries — brokers, insolvency practitioners and association officials — ranked by deal-flow relevance.</p>
+      <div id="contacts-grid" class="card-grid"></div>
+      <div id="contacts-empty" class="empty-state" hidden>No outreach contacts.</div>
     </section>
   </main>
 
   <footer class="app-footer">
-    <span>Deterministic &middot; non-scraping &middot; strict JSON output</span>
+    <span>Deterministic · non-scraping · strict JSON output</span>
+    <span class="disclaimer">All bundled data is illustrative demo content — fictional businesses, people and figures.</span>
   </footer>
+
+  <!-- ===================== Detail drawer ===================== -->
+  <div id="drawer-overlay" class="overlay" hidden></div>
+  <aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden tabindex="-1">
+    <div class="drawer-head">
+      <h2 id="drawer-title">Deal detail</h2>
+      <button id="drawer-close" class="icon-btn" type="button" aria-label="Close detail">
+        <svg viewBox="0 0 20 20" width="18" height="18"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+
+  <!-- ===================== Process modal ===================== -->
+  <div id="modal-overlay" class="overlay" hidden></div>
+  <div id="process-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden>
+    <div class="modal-head">
+      <h2 id="modal-title">Process a custom batch</h2>
+      <button id="modal-close" class="icon-btn" type="button" aria-label="Close dialog">
+        <svg viewBox="0 0 20 20" width="18" height="18"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <p class="modal-hint">Paste a JSON array of source items, then run the pipeline.</p>
+    <textarea id="batch-input" spellcheck="false" aria-label="Batch JSON input"
+      placeholder='[{"source_name": "scaling.com.au", "source_type": "marketplace", "raw_text": "..."}]'></textarea>
+    <p id="modal-status" class="modal-status" role="status" aria-live="polite"></p>
+    <div class="modal-actions">
+      <button id="modal-fill-sample" class="btn btn-ghost" type="button">Insert sample</button>
+      <button id="modal-run" class="btn btn-primary" type="button">Run batch</button>
+    </div>
+  </div>
+
+  <!-- ===================== Loading + toast ===================== -->
+  <div id="loading" class="loading" hidden aria-live="polite" aria-busy="true">
+    <div class="spinner" aria-hidden="true"></div>
+    <span id="loading-text">Processing…</span>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="/static/app.js"></script>
 </body>
