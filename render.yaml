@@ -21,13 +21,45 @@ services:
       # Set real values in the Render dashboard's Environment tab.
       - key: APIFY_TOKEN
         sync: false
+      # Per-source Apify actor ids. One APIFY_ACTOR_<SOURCE> per registered
+      # source; declared here (sync:false) so they appear in Render's dashboard
+      # ready to fill in. A source stays idle until APIFY_TOKEN + its actor id
+      # are both set.
+      - key: APIFY_ACTOR_BUSINESSFORSALE_AU
+        sync: false
+      - key: APIFY_ACTOR_BSALE
+        sync: false
+      - key: APIFY_ACTOR_ANYBUSINESS
+        sync: false
+      - key: APIFY_ACTOR_ALLBUSINESS_AU
+        sync: false
+      - key: APIFY_ACTOR_LINK_BUSINESS
+        sync: false
+      - key: APIFY_ACTOR_SBX_BUSINESS
+        sync: false
+      - key: APIFY_ACTOR_RESOLVE
+        sync: false
+      - key: APIFY_ACTOR_BENCHMARK_BUSINESS
+        sync: false
+      - key: APIFY_ACTOR_BUSINESSESFORSALE_AU
+        sync: false
+      - key: APIFY_ACTOR_FRANCHISE2SELL
+        sync: false
+      - key: APIFY_ACTOR_SCALING
+        sync: false
+      - key: APIFY_ACTOR_SCALINGUP_COM_AU
+        sync: false
       - key: LINKEDIN_INGEST_ENABLED
         value: "false"
       - key: LINKEDIN_API_TOKEN
+        sync: false
+      - key: APIFY_ACTOR_LINKEDIN
         sync: false
       - key: FACEBOOK_INGEST_ENABLED
         value: "false"
       - key: FACEBOOK_API_TOKEN
         sync: false
       - key: FACEBOOK_GROUP_IDS
+        sync: false
+      - key: APIFY_ACTOR_FACEBOOK_GROUPS
         sync: false

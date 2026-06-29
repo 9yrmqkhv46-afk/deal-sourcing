@@ -96,6 +96,42 @@ simply stays idle and the seeded sample data is served):
 The daily schedule defaults to **03:00, 03:15, 03:30 and 03:45** server time
 and is configurable via `SYNC_TIMES`.
 
+### Per-source Apify actor env vars (set in Render's **Environment** tab)
+
+Live ingestion requires **`APIFY_TOKEN`** (one token for all Apify-backed
+sources) **plus** a per-source actor id. Each source resolves its own actor id
+from a deterministic env var named `APIFY_ACTOR_<SOURCE>`. A source shows as
+**Needs API key** in the dashboard's **Data Sources** panel until both
+`APIFY_TOKEN` and its actor env var below are set; until then the seeded sample
+data is served. Set these in the Render service's **Environment** tab:
+
+| # | Source | Site | Actor env var |
+|---|--------|------|---------------|
+| 1 | BusinessForSale.com.au | https://www.businessforsale.com.au | `APIFY_ACTOR_BUSINESSFORSALE_AU` |
+| 2 | Bsale | https://www.bsale.com.au | `APIFY_ACTOR_BSALE` |
+| 3 | AnyBusiness | https://www.anybusiness.com.au | `APIFY_ACTOR_ANYBUSINESS` |
+| 4 | AllBusiness.com.au | https://www.allbusiness.com.au | `APIFY_ACTOR_ALLBUSINESS_AU` |
+| 5 | LINK Business Brokers | https://linkbusiness.com.au | `APIFY_ACTOR_LINK_BUSINESS` |
+| 6 | SBX Business Brokers | https://www.sbxbusiness.com.au | `APIFY_ACTOR_SBX_BUSINESS` |
+| 7 | Resolve Marketplace | https://www.resolve.com.au | `APIFY_ACTOR_RESOLVE` |
+| 8 | Benchmark Business | https://www.benchmarkbusiness.com.au | `APIFY_ACTOR_BENCHMARK_BUSINESS` |
+| 9 | BusinessesForSale.com Australia | https://www.businessesforsale.com/australia | `APIFY_ACTOR_BUSINESSESFORSALE_AU` |
+| 10 | Franchise2Sell | https://www.franchise2sell.com.au | `APIFY_ACTOR_FRANCHISE2SELL` |
+| 11 | Scaling (scaling.com.au) | https://scaling.com.au | `APIFY_ACTOR_SCALING` |
+| 12 | ScalingUp (scalingup.com.au) | https://scalingup.com.au | `APIFY_ACTOR_SCALINGUP_COM_AU` |
+
+> **`APIFY_TOKEN` is required** for every source above — without it all twelve
+> stay idle. The LinkedIn and Facebook connectors are **separate** and gated by
+> their own enable flags + tokens (`LINKEDIN_INGEST_ENABLED` +
+> `LINKEDIN_API_TOKEN`; `FACEBOOK_INGEST_ENABLED` + `FACEBOOK_API_TOKEN` +
+> `FACEBOOK_GROUP_IDS`), and may only be used with **your own authorized,
+> Terms-of-Service-compliant source** (see the compliance note below).
+
+Inspect live configuration at any time via `GET /api/sources`, which reports
+`apify_token_present` plus, for every source, its `configured` flag and the
+exact `actor_env_var` to set. Use the dashboard's **Sync now** button to trigger
+a sync; unconfigured sources are reported as `skipped: no API key`.
+
 ### Compliance note — LinkedIn & Facebook (IMPORTANT)
 
 The LinkedIn and Facebook connectors ship as **generic, credential-gated
@@ -129,6 +165,7 @@ Then open <http://localhost:8000> and click **Load sample data**.
 - `GET  /` — dashboard
 - `POST /api/process` — body `{ "batch": [ ...source items... ], "config": { ...overrides? } }` → strict JSON output
 - `GET  /api/sample` — bundled demo batch
+- `GET  /api/sources` — `{ apify_token_present, sources: [ { key, name, source_type, base_url, configured, actor_env_var, requires, note } ] }`
 - `POST /api/refresh` — re-query the latest DB snapshot (NOT a scrape) → strict keys + `last_synced_at` + `jobs`
 - `GET  /api/status` — `{ last_synced_at, jobs: [...] }` per-source sync status
 - `POST /api/sync` — manually trigger a background sync (credential-gated sources still no-op safely)

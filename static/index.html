@@ -28,6 +28,10 @@
         <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 5.5A6.5 6.5 0 103.7 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M16 3v3h-3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Refresh now
       </button>
+      <button id="sync-now" class="btn" type="button" title="Trigger a live sync across all configured sources">
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10a7 7 0 0112-5m2 5a7 7 0 01-12 5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M15 2v3h-3M5 18v-3h3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Sync now
+      </button>
       <button id="load-sample" class="btn" type="button">
         <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.2-3.2M10 12l3.2-3.2M4 15h12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Load sample data
@@ -110,6 +114,7 @@
       <button class="tab" role="tab" aria-selected="false" data-tab="companies" id="tab-companies">Companies</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="founders" id="tab-founders">Founders</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="contacts" id="tab-contacts">Top Contacts</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="sources" id="tab-sources">Data Sources</button>
     </nav>
 
     <!-- ===================== Deals view ===================== -->
@@ -181,6 +186,17 @@
       <p class="view-intro">Prioritised intermediaries — brokers, insolvency practitioners and association officials — ranked by deal-flow relevance.</p>
       <div id="contacts-grid" class="card-grid"></div>
       <div id="contacts-empty" class="empty-state" hidden>No outreach contacts.</div>
+    </section>
+
+    <!-- ===================== Data Sources view ===================== -->
+    <section id="view-sources" class="view" role="tabpanel" aria-labelledby="tab-sources" hidden>
+      <div id="sources-banner" class="info-banner" hidden>
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M10 9v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6.4" r="1" fill="currentColor"/></svg>
+        <span id="sources-banner-text">Add an Apify API key in Render to pull live listings from these sources.</span>
+      </div>
+      <p class="view-intro">Every registered live source. Sources marked <b>Needs API key</b> won't return live deals until their Apify token and actor id are set in Render's Environment tab — until then the dashboard shows seeded sample data.</p>
+      <div id="sources-grid" class="card-grid"></div>
+      <div id="sources-empty" class="empty-state" hidden>No sources registered.</div>
     </section>
   </main>
 

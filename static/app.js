@@ -7,6 +7,7 @@
 
 const state = {
   data: null,
+  sources: null,
   lastBatch: null,
   tab: "deals",
   sort: { key: "overall_score", dir: "desc" },
@@ -469,6 +470,98 @@ function renderContacts() {
     .join("");
 }
 
+/* ---------------------------- data sources panel ---------------------- */
+
+async function loadSources() {
+  try {
+    const res = await fetch("/api/sources");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    state.sources = await res.json();
+    renderSources();
+  } catch (_err) {
+    /* sources panel is best-effort; ignore transient errors */
+  }
+}
+
+function sourceTypeLabel(t) {
+  return titleCase(t);
+}
+
+function renderSources() {
+  const payload = state.sources;
+  if (!payload) return;
+  const sources = payload.sources || [];
+  const grid = $("#sources-grid");
+  const needKey = sources.filter((s) => !s.configured).length;
+
+  // Info banner explaining why no live deals appear when keys are missing.
+  const banner = $("#sources-banner");
+  if (needKey > 0) {
+    const tokenMsg = payload.apify_token_present
+      ? `${needKey} source${needKey === 1 ? "" : "s"} still need a per-source actor id set in Render to pull live listings.`
+      : "Add an Apify API key (APIFY_TOKEN) in Render to pull live listings from these sources. Until then the dashboard shows seeded sample data.";
+    $("#sources-banner-text").textContent = tokenMsg;
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+
+  $("#sources-empty").hidden = sources.length > 0;
+  grid.innerHTML = sources
+    .map((s) => {
+      const configured = !!s.configured;
+      const badge = configured
+        ? `<span class="src-badge src-ok">Configured ✅</span>`
+        : `<span class="src-badge src-need">Needs API key 🔑</span>`;
+      const envRow = configured
+        ? ""
+        : `<div class="src-env">Set <code>${escapeHtml(s.actor_env_var)}</code></div>`;
+      const reqTag = `<span class="src-req">${escapeHtml(sourceTypeLabel(s.source_type))} · ${escapeHtml(s.requires)}</span>`;
+      const site = originalSiteLink(s.base_url, "View site");
+      return `<div class="ecard src-card ${configured ? "is-ok" : "is-need"}">
+        <div class="ecard-top">
+          <span class="ecard-name">${escapeHtml(s.name)}</span>
+          ${badge}
+        </div>
+        <div class="ecard-meta">${reqTag}</div>
+        ${envRow}
+        <div class="src-note">${escapeHtml(s.note)}</div>
+        ${site ? `<div class="ecard-links">${site}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+}
+
+let syncPollTimer = null;
+
+async function syncNow() {
+  const btn = $("#sync-now");
+  btn.disabled = true;
+  showLoading("Starting live sync across sources…");
+  try {
+    const res = await fetch("/api/sync", { method: "POST" });
+    if (!res.ok && res.status !== 202) throw new Error("HTTP " + res.status);
+    const body = await res.json();
+    renderStatus({ last_synced_at: body.last_synced_at, jobs: body.jobs });
+    toast("Sync started — watching per-source results…", "ok");
+
+    // Poll status a handful of times so per-source results surface promptly.
+    let ticks = 0;
+    clearInterval(syncPollTimer);
+    syncPollTimer = setInterval(async () => {
+      ticks += 1;
+      await pollStatus();
+      await loadSources();
+      if (ticks >= 8) clearInterval(syncPollTimer);
+    }, 1500);
+  } catch (err) {
+    toast("Sync failed: " + err.message, "error");
+  } finally {
+    hideLoading();
+    btn.disabled = false;
+  }
+}
+
 /* ---------------------------- detail drawer ---------------------------- */
 
 let lastFocused = null;
@@ -658,6 +751,7 @@ function switchTab(name) {
 
 function bindEvents() {
   $("#refresh-now").addEventListener("click", refreshNow);
+  $("#sync-now").addEventListener("click", syncNow);
   $("#load-sample").addEventListener("click", loadSample);
   $("#open-process").addEventListener("click", openModal);
   $("#export-json").addEventListener("click", exportJson);
@@ -698,5 +792,6 @@ bindEvents();
 // On first paint, load the latest synced snapshot from the DB so the dashboard
 // reflects persisted state. Then keep the per-source status badges fresh.
 refreshNow();
+loadSources();
 pollStatus();
 setInterval(pollStatus, 30000);

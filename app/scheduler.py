@@ -92,7 +92,7 @@ def run_sync(source_keys: Optional[list[str]] = None) -> dict:
 
         connector = get_connector(key)
         if not connector.is_configured():
-            store.upsert_job(key, job_name, "skipped", message="not configured (no credentials)")
+            store.upsert_job(key, job_name, "skipped", message="skipped: no API key")
             continue
 
         store.upsert_job(key, job_name, "running", started_at=_now_iso(), message=f"syncing {display}")
@@ -114,7 +114,7 @@ def run_sync(source_keys: Optional[list[str]] = None) -> dict:
             finished_at=_now_iso(),
             last_sync_at=_now_iso(),
             item_count=len(items),
-            message=f"fetched {len(items)} item(s)",
+            message=f"success: {len(items)} items",
         )
 
     if combined:

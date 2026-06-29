@@ -6,6 +6,8 @@ Routes
 * ``POST /api/process`` -> runs the pipeline over ``{batch, config?}`` and
   returns the strict JSON output contract.
 * ``GET  /api/sample``  -> returns the bundled demo batch.
+* ``GET  /api/sources`` -> per-source config diagnostics (configured vs needs-key
+  plus the exact actor env var to set) for the dashboard's Data Sources panel.
 * ``POST /api/refresh`` -> re-queries the DB (NOT a re-scrape) and returns the
   latest snapshot plus ``last_synced_at`` and per-source ``jobs``.
 * ``GET  /api/status``  -> returns ``last_synced_at`` + per-source job status.
@@ -36,6 +38,7 @@ from .models import ProcessRequest
 from .pipeline import process_batch
 from .sample_data import sample_batch
 from .scheduler import run_sync, shutdown_scheduler, start_scheduler
+from .sources import apify_token_present, source_config_status
 
 logger = logging.getLogger("app.main")
 
@@ -107,6 +110,30 @@ def get_sample() -> dict[str, list]:
     """Return the bundled demo batch the dashboard can load."""
 
     return {"batch": sample_batch()}
+
+
+@app.get("/api/sources")
+def sources() -> JSONResponse:
+    """Return per-source configuration diagnostics for the dashboard.
+
+    Shape::
+
+        {
+          "apify_token_present": bool,
+          "sources": [ { key, name, source_type, base_url, configured,
+                         actor_env_var, requires, note }, ... ]
+        }
+
+    The UI uses this to show which sources are live ("Configured") versus which
+    still need an API key, including the exact env var name to set.
+    """
+
+    return JSONResponse(
+        content={
+            "apify_token_present": apify_token_present(),
+            "sources": source_config_status(),
+        }
+    )
 
 
 @app.post("/api/process")
