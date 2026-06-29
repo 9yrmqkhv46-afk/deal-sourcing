@@ -185,6 +185,91 @@ Then open <http://localhost:8000> and click **Load sample data**.
 - `POST /api/sync` — manually trigger a background sync (credential-gated sources still no-op safely)
 - `GET  /api/health` — liveness probe
 
+#### Live-data API (additive, live sources only)
+
+These GET endpoints reflect **only live connector data**. Fetched items run
+through the same deterministic `process_batch` pipeline; the output is then
+shaped to the contracts below. When no live source is configured (or a
+configured source returns nothing) they respond with **empty lists plus a clear
+`note`** — they do **not** fall back to sample data, and they never fabricate
+listings or posts. (`/api/refresh` keeps its seeded-sample behaviour; these
+endpoints intentionally do not.)
+
+- `GET /api/brokers/deals?limit=50&country=Australia` — live deals from
+  marketplace / broker_directory sources (the 10 AU sites + scaling/scalingup).
+- `GET /api/franchises/deals?limit=50&country=Australia` — live deals from the
+  franchise source(s) (`franchise2sell`) and/or `is_franchise` listings.
+- `GET /api/insolvency/opportunities?country=Australia` — live distress
+  opportunities from `insolvency_platform` sources.
+- `GET /api/linkedin/posts?country=Australia&since_days=1` — live LinkedIn posts
+  via the credential-gated, ToS-compliant connector.
+- `GET /api/live/today?country=Australia` — convenience aggregator: brokers +
+  franchises (limit 50) + LinkedIn (since_days=1), merged.
+
+**Deal response shape** (brokers / franchises / insolvency):
+
+```json
+{
+  "deals": [
+    {
+      "id": "deal_001",
+      "source_name": "Bsale",
+      "source_url": "https://www.bsale.com.au/listing/555",
+      "title": "...",
+      "sector": "manufacturing",
+      "location": "Sydney, NSW",
+      "asking_price": 750000,
+      "revenue": 900000,
+      "ebitda": 300000,
+      "listing_date": "2024-06-01",
+      "thesis_match": {
+        "passes_age_filter": true,
+        "passes_sector_filter": true,
+        "passes_financial_filter": true,
+        "passes_founder_filter": null,
+        "ai_automation_potential_flag": null,
+        "overall_score": 72,
+        "classification": "core_thesis",
+        "explanation": "..."
+      }
+    }
+  ],
+  "summary": {
+    "core_thesis_deal_count": 1,
+    "adjacent_thesis_deal_count": 0,
+    "top_core_thesis_deals": ["deal_001"]
+  },
+  "note": null
+}
+```
+
+`source_url` is the deal's `listing_url` (source `base_url` + external id).
+
+**LinkedIn response shape** (`/api/linkedin/posts`):
+
+```json
+{
+  "linkedin_posts": [
+    { "id": "...", "author_name": "...", "author_linkedin_url": "...",
+      "text": "...", "created_at": "...", "url": "..." }
+  ],
+  "summary": { "top_linkedin_posts": ["..."] },
+  "note": null
+}
+```
+
+**Today response shape** (`/api/live/today`) merges both: `{ deals,
+linkedin_posts, summary { core_thesis_deal_count, adjacent_thesis_deal_count,
+top_core_thesis_deals, top_linkedin_posts }, note }`.
+
+**Configuration required:** these endpoints return data only when live sources
+are configured (`APIFY_TOKEN` + an actor for deals; for LinkedIn, your own
+authorized source — see the LinkedIn compliance note above). With no
+credentials they return empty `deals` / `linkedin_posts` plus an explanatory
+`note`. LinkedIn ingestion must use **your own authorized API/Apify actor** and
+comply with LinkedIn's Terms of Service; no scraping or anti-bot logic is
+included.
+
 Example:
 
 ```bash

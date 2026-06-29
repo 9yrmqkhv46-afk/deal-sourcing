@@ -195,6 +195,7 @@
         <span id="sources-banner-text">Add an Apify API key in Render to pull live listings from these sources.</span>
       </div>
       <p class="view-intro">Every registered live source. Sources marked <b>Needs API key</b> won't return live deals until their Apify token and actor id are set in Render's Environment tab — until then the dashboard shows seeded sample data.</p>
+      <p class="view-intro"><b>Live API:</b> five read-only endpoints expose live connector data (no sample fallback): <code>GET /api/brokers/deals</code>, <code>GET /api/franchises/deals</code>, <code>GET /api/insolvency/opportunities</code>, <code>GET /api/linkedin/posts</code>, <code>GET /api/live/today</code>. They return empty results plus a <code>note</code> until live sources are configured.</p>
       <div id="sources-grid" class="card-grid"></div>
       <div id="sources-empty" class="empty-state" hidden>No sources registered.</div>
     </section>

@@ -211,6 +211,21 @@ class Contact(BaseModel):
     priority_reason: Optional[str] = None
 
 
+class LinkedInPost(BaseModel):
+    """A LinkedIn post surfaced by the credential-gated LinkedIn connector.
+
+    Every field except ``id`` is optional and defaults to ``None`` so the model
+    never fabricates author, text, timestamp or URL data it did not receive.
+    """
+
+    id: str
+    author_name: Optional[str] = None
+    author_linkedin_url: Optional[str] = None
+    text: Optional[str] = None
+    created_at: Optional[str] = None
+    url: Optional[str] = None
+
+
 class Summary(BaseModel):
     """Aggregate counts and prioritized top lists."""
 

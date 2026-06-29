@@ -31,6 +31,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import live
 from . import store
 from .config import load_thesis_config
 from .ingestion import BatchValidationError
@@ -204,6 +205,49 @@ def sync(background_tasks: BackgroundTasks) -> JSONResponse:
             "jobs": store.get_job_statuses(),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Live-data API (ADDITIVE). These GET endpoints reflect ONLY live connector
+# data: they run fetched items through the existing pipeline and shape the
+# output. When no live source is configured they return empty lists plus a
+# clear ``note`` (NO sample fallback). They never fabricate listings or posts.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/brokers/deals")
+def brokers_deals(limit: int = 50, country: str = "Australia") -> JSONResponse:
+    """Live broker / marketplace deals (marketplace + broker_directory sources)."""
+
+    return JSONResponse(content=live.brokers_deals(limit=limit, country=country))
+
+
+@app.get("/api/franchises/deals")
+def franchises_deals(limit: int = 50, country: str = "Australia") -> JSONResponse:
+    """Live franchise deals (franchise source(s) / is_franchise listings)."""
+
+    return JSONResponse(content=live.franchises_deals(limit=limit, country=country))
+
+
+@app.get("/api/insolvency/opportunities")
+def insolvency_opportunities(country: str = "Australia") -> JSONResponse:
+    """Live insolvency / distress opportunities (insolvency_platform sources)."""
+
+    return JSONResponse(content=live.insolvency_opportunities(country=country))
+
+
+@app.get("/api/linkedin/posts")
+def linkedin_posts(country: str = "Australia", since_days: int = 1) -> JSONResponse:
+    """Live LinkedIn posts via the ToS-compliant, credential-gated connector."""
+
+    return JSONResponse(content=live.linkedin_posts(country=country, since_days=since_days))
+
+
+@app.get("/api/live/today")
+def live_today(country: str = "Australia") -> JSONResponse:
+    """Aggregated "today" view: brokers + franchises + LinkedIn posts merged."""
+
+    return JSONResponse(content=live.live_today(country=country))
 
 
 # Mount static assets last so API routes take precedence.
