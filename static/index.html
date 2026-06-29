@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TransformBiz - Deal-Sourcing &amp; CRM Enrichment</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">TB</span>
+      <div>
+        <h1>TransformBiz</h1>
+        <p class="subtitle">Deal-Sourcing &amp; CRM Enrichment Agent</p>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="load-sample" class="btn btn-primary">Load sample data</button>
+      <button id="run-batch" class="btn">Process batch</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="input-panel">
+      <details>
+        <summary>Batch input (JSON array of source items)</summary>
+        <textarea id="batch-input" spellcheck="false"
+          placeholder='[{"source_name": "scaling.com.au", "source_type": "marketplace", "raw_text": "..."}]'></textarea>
+        <p id="status" class="status"></p>
+      </details>
+    </section>
+
+    <section id="summary-cards" class="summary-cards" hidden>
+      <div class="card card-core">
+        <span class="card-label">Core thesis</span>
+        <span class="card-value" id="count-core">0</span>
+      </div>
+      <div class="card card-adjacent">
+        <span class="card-label">Adjacent thesis</span>
+        <span class="card-value" id="count-adjacent">0</span>
+      </div>
+      <div class="card card-reject">
+        <span class="card-label">Reject</span>
+        <span class="card-value" id="count-reject">0</span>
+      </div>
+      <div class="card card-total">
+        <span class="card-label">Total deals</span>
+        <span class="card-value" id="count-total">0</span>
+      </div>
+    </section>
+
+    <section id="deals-section" class="panel" hidden>
+      <div class="panel-head">
+        <h2>Deals</h2>
+        <div id="filter-chips" class="chips"></div>
+      </div>
+      <div class="table-wrap">
+        <table id="deals-table">
+          <thead>
+            <tr>
+              <th data-sort="title">Title</th>
+              <th data-sort="company">Company</th>
+              <th data-sort="source_type">Source</th>
+              <th data-sort="deal_size_bucket">Size</th>
+              <th data-sort="overall_score" class="sortable active">Score &#9660;</th>
+              <th data-sort="classification">Classification</th>
+            </tr>
+          </thead>
+          <tbody id="deals-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="grid-2">
+      <section id="companies-section" class="panel" hidden>
+        <div class="panel-head"><h2>Companies</h2></div>
+        <ul id="companies-list" class="entity-list"></ul>
+      </section>
+
+      <section id="founders-section" class="panel" hidden>
+        <div class="panel-head"><h2>Founders &amp; Key People</h2></div>
+        <ul id="founders-list" class="entity-list"></ul>
+      </section>
+    </div>
+
+    <section id="contacts-section" class="panel" hidden>
+      <div class="panel-head"><h2>Top contacts for outreach</h2></div>
+      <ul id="contacts-list" class="contact-list"></ul>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Deterministic &middot; non-scraping &middot; strict JSON output</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

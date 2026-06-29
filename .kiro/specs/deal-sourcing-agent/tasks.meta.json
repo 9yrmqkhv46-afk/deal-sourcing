@@ -1,0 +1,61 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "6.2 Implement deal-size bucketing": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995905
+      }
+    ],
+    "7.2 Implement `compute_score`": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995908
+      }
+    ],
+    "7.4 Implement `classify` and `build_thesis_match`": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995911
+      }
+    ],
+    "8. Checkpoint - core logic": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995914
+      }
+    ],
+    "14. Checkpoint - all tests": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995917
+      }
+    ],
+    "17. Build and wire the dashboard (GET /)": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995920
+      }
+    ],
+    "18. Write deployment artifacts for GitHub + Render": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995923
+      }
+    ],
+    "19. Final checkpoint - smoke test the deployable service": [
+      {
+        "executionId": "efbbf597-d314-44a0-aaa9-1738e01d4df3",
+        "chatSessionId": "6c37968d-c982-4969-a161-2274c1754700",
+        "timestamp": 1782725995933
+      }
+    ]
+  }
+}
