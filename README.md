@@ -85,6 +85,8 @@ simply stays idle and the seeded sample data is served):
 | `SCHEDULER_ENABLED` | Enable the daily scheduler | `true` |
 | `SYNC_TIMES` | Comma-separated `HH:MM` daily sync times | `03:00,03:15,03:30,03:45` |
 | `APIFY_TOKEN` | Apify API token for live actors | _(unset → no-op)_ |
+| `APIFY_DEFAULT_ACTOR` | **Single shared actor id** that drives ANY source without its own actor | _(unset)_ |
+| `APIFY_ACTOR` | Alias for `APIFY_DEFAULT_ACTOR` (used if the former is unset) | _(unset)_ |
 | `APIFY_ACTOR_<SOURCE>` | Per-source Apify actor id (e.g. `APIFY_ACTOR_BSALE`) | _(unset → no-op)_ |
 | `LINKEDIN_INGEST_ENABLED` | Enable the LinkedIn connector | `false` |
 | `LINKEDIN_API_TOKEN` | Token for your authorized LinkedIn source | _(unset → no-op)_ |
@@ -99,11 +101,20 @@ and is configurable via `SYNC_TIMES`.
 ### Per-source Apify actor env vars (set in Render's **Environment** tab)
 
 Live ingestion requires **`APIFY_TOKEN`** (one token for all Apify-backed
-sources) **plus** a per-source actor id. Each source resolves its own actor id
-from a deterministic env var named `APIFY_ACTOR_<SOURCE>`. A source shows as
-**Needs API key** in the dashboard's **Data Sources** panel until both
-`APIFY_TOKEN` and its actor env var below are set; until then the seeded sample
-data is served. Set these in the Render service's **Environment** tab:
+sources) **plus** an actor id. Each source resolves its actor id in priority
+order:
+
+1. its **own** dedicated env var `APIFY_ACTOR_<SOURCE>`;
+2. the shared **default** actor `APIFY_DEFAULT_ACTOR` (or its alias `APIFY_ACTOR`);
+3. otherwise it stays idle.
+
+This means a **single uploaded actor** can serve every source at once: set
+`APIFY_TOKEN` + `APIFY_DEFAULT_ACTOR` and all sources go live, while any source
+you want to specialise can still override the default with its own
+`APIFY_ACTOR_<SOURCE>`. A source shows as **Needs API key** in the dashboard's
+**Data Sources** panel until both a token and a (specific *or* default) actor
+are configured; until then the seeded sample data is served. Set these in the
+Render service's **Environment** tab:
 
 | # | Source | Site | Actor env var |
 |---|--------|------|---------------|
@@ -128,9 +139,12 @@ data is served. Set these in the Render service's **Environment** tab:
 > Terms-of-Service-compliant source** (see the compliance note below).
 
 Inspect live configuration at any time via `GET /api/sources`, which reports
-`apify_token_present` plus, for every source, its `configured` flag and the
-exact `actor_env_var` to set. Use the dashboard's **Sync now** button to trigger
-a sync; unconfigured sources are reported as `skipped: no API key`.
+`apify_token_present` plus, for every source, its `configured` flag, the
+`actor_source` (`specific` / `default` / `none`), whether an actor id is
+resolvable (`resolved_actor_id_present`, value never leaked) and the exact
+`actor_env_var` to set. Use the dashboard's **Sync now** button to trigger a
+sync; unconfigured sources are reported as `skipped: no API key` (or
+`skipped: no actor` when a token is set but no actor is resolvable).
 
 ### Compliance note — LinkedIn & Facebook (IMPORTANT)
 
@@ -165,7 +179,7 @@ Then open <http://localhost:8000> and click **Load sample data**.
 - `GET  /` — dashboard
 - `POST /api/process` — body `{ "batch": [ ...source items... ], "config": { ...overrides? } }` → strict JSON output
 - `GET  /api/sample` — bundled demo batch
-- `GET  /api/sources` — `{ apify_token_present, sources: [ { key, name, source_type, base_url, configured, actor_env_var, requires, note } ] }`
+- `GET  /api/sources` — `{ apify_token_present, sources: [ { key, name, source_type, base_url, configured, actor_env_var, actor_source, resolved_actor_id_present, requires, note } ] }`
 - `POST /api/refresh` — re-query the latest DB snapshot (NOT a scrape) → strict keys + `last_synced_at` + `jobs`
 - `GET  /api/status` — `{ last_synced_at, jobs: [...] }` per-source sync status
 - `POST /api/sync` — manually trigger a background sync (credential-gated sources still no-op safely)

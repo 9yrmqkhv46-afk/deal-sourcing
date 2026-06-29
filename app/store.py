@@ -79,6 +79,16 @@ def init_db() -> None:
             )
             """
         )
+        # Backward-compatible diagnostic columns (added via ALTER so existing
+        # databases pick them up without a destructive migration).
+        for column_def in (
+            "fetched_count INTEGER",
+            "produced_deal_count INTEGER",
+        ):
+            try:
+                conn.execute(f"ALTER TABLE sync_jobs ADD COLUMN {column_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
 
 
@@ -127,6 +137,8 @@ def upsert_job(
     last_sync_at: Optional[str] = None,
     item_count: Optional[int] = None,
     message: Optional[str] = None,
+    fetched_count: Optional[int] = None,
+    produced_deal_count: Optional[int] = None,
 ) -> None:
     """Insert or update a sync job's status row.
 
@@ -148,8 +160,9 @@ def upsert_job(
                 """
                 INSERT INTO sync_jobs
                     (source_key, job_name, status, started_at, finished_at,
-                     last_sync_at, item_count, message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     last_sync_at, item_count, message, fetched_count,
+                     produced_deal_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_key,
@@ -160,6 +173,8 @@ def upsert_job(
                     last_sync_at,
                     int(item_count or 0),
                     message,
+                    fetched_count,
+                    produced_deal_count,
                 ),
             )
         else:
@@ -172,7 +187,9 @@ def upsert_job(
                     finished_at = COALESCE(?, finished_at),
                     last_sync_at = COALESCE(?, last_sync_at),
                     item_count = COALESCE(?, item_count),
-                    message = COALESCE(?, message)
+                    message = COALESCE(?, message),
+                    fetched_count = COALESCE(?, fetched_count),
+                    produced_deal_count = COALESCE(?, produced_deal_count)
                 WHERE source_key = ?
                 """,
                 (
@@ -183,6 +200,8 @@ def upsert_job(
                     last_sync_at,
                     item_count,
                     message,
+                    fetched_count,
+                    produced_deal_count,
                     source_key,
                 ),
             )
@@ -206,6 +225,8 @@ def get_job_statuses() -> list[dict[str, Any]]:
             "last_sync_at": r["last_sync_at"],
             "item_count": r["item_count"],
             "message": r["message"],
+            "fetched_count": r["fetched_count"],
+            "produced_deal_count": r["produced_deal_count"],
         }
         for r in rows
     ]

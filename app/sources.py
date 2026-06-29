@@ -232,6 +232,50 @@ def apify_token_present() -> bool:
     return bool(token and token.strip())
 
 
+#: Environment variables that may hold a single shared "default" Apify actor id.
+#: When a source lacks its own dedicated actor env var, this default drives it -
+#: so one uploaded actor can serve every source. ``APIFY_DEFAULT_ACTOR`` is the
+#: recommended name; ``APIFY_ACTOR`` is supported as a convenient alias.
+_DEFAULT_ACTOR_ENVS: tuple[str, ...] = ("APIFY_DEFAULT_ACTOR", "APIFY_ACTOR")
+
+
+def default_actor_id() -> Optional[str]:
+    """Resolve the shared default Apify actor id from the environment, if any.
+
+    Checks ``APIFY_DEFAULT_ACTOR`` first, then ``APIFY_ACTOR``. Returns the
+    first non-empty value (stripped) or ``None``.
+    """
+
+    for var in _DEFAULT_ACTOR_ENVS:
+        value = os.environ.get(var)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def resolve_actor(source_key: str) -> tuple[Optional[str], str]:
+    """Resolve the Apify actor id for ``source_key`` and how it was found.
+
+    Priority order:
+
+    1. The source's **specific** actor env var (``APIFY_ACTOR_<SOURCE>``).
+    2. The shared **default** actor (``APIFY_DEFAULT_ACTOR`` / ``APIFY_ACTOR``).
+    3. Otherwise **none**.
+
+    Returns ``(actor_id, actor_source)`` where ``actor_source`` is one of
+    ``"specific"``, ``"default"`` or ``"none"``. This lets a single uploaded
+    actor (set as the default) drive any source that lacks a dedicated actor id.
+    """
+
+    entry = get_source(source_key)
+    if entry is not None and entry.apify_actor_id:
+        return entry.apify_actor_id, "specific"
+    shared = default_actor_id()
+    if shared:
+        return shared, "default"
+    return None, "none"
+
+
 def _requires(source_key: str) -> str:
     """Return which credential family a source needs: apify/linkedin/facebook."""
 
@@ -259,13 +303,22 @@ def _note(entry: SourceEntry, requires: str, configured: bool) -> str:
             "in compliance with Facebook's Terms of Service."
         )
     # Apify-backed marketplace / broker sources.
+    _, actor_source = resolve_actor(entry.key)
     if configured:
+        if actor_source == "default":
+            return (
+                "Configured via the shared default actor (APIFY_DEFAULT_ACTOR / "
+                f"APIFY_ACTOR); set {env} to give this source its own dedicated actor."
+            )
         return f"Configured: APIFY_TOKEN and {env} are set; live ingestion is enabled."
     if apify_token_present():
-        return f"APIFY_TOKEN is set, but {env} is missing. Set it in Render to pull live listings."
+        return (
+            f"APIFY_TOKEN is set, but no actor is configured. Set {env} for this source "
+            "or APIFY_DEFAULT_ACTOR to drive all sources with one actor."
+        )
     return (
-        f"Add an Apify API key (APIFY_TOKEN) and set {env} in Render's Environment "
-        "tab to pull live listings from this source."
+        f"Add an Apify API key (APIFY_TOKEN) and set {env} (or APIFY_DEFAULT_ACTOR for "
+        "a single shared actor) in Render's Environment tab to pull live listings."
     )
 
 
@@ -295,7 +348,9 @@ def source_config_status() -> list[dict]:
           "source_type": str,     # marketplace | broker_directory | social | ...
           "base_url": str,        # canonical site URL
           "configured": bool,     # ready to ingest live data right now?
-          "actor_env_var": str,   # exact env var name to set for this source
+          "actor_env_var": str,   # exact (recommended) specific env var to set
+          "actor_source": str,    # "specific" | "default" | "none"
+          "resolved_actor_id_present": bool,  # is an actor resolvable? (value NOT leaked)
           "requires": str,        # "apify" | "linkedin" | "facebook"
           "note": str,            # human-friendly guidance
         }
@@ -305,6 +360,7 @@ def source_config_status() -> list[dict]:
     for entry in REGISTRY.all():
         requires = _requires(entry.key)
         configured = _is_configured(entry.key)
+        resolved_actor, actor_source = resolve_actor(entry.key)
         statuses.append(
             {
                 "key": entry.key,
@@ -313,6 +369,9 @@ def source_config_status() -> list[dict]:
                 "base_url": entry.base_url,
                 "configured": configured,
                 "actor_env_var": entry.apify_actor_env or actor_env_var(entry.key),
+                "actor_source": actor_source,
+                # Report presence only - never leak the actual actor id value.
+                "resolved_actor_id_present": bool(resolved_actor),
                 "requires": requires,
                 "note": _note(entry, requires, configured),
             }

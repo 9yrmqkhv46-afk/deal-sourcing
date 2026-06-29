@@ -1,22 +1,32 @@
 """Generic Apify-backed connector.
 
-If ``APIFY_TOKEN`` and the source's actor id (``APIFY_ACTOR_<SOURCE>``) are set
-*and* the network is reachable, this connector triggers the Apify actor run,
-waits for it to finish, downloads the dataset items, and maps each item into a
-:class:`~app.models.SourceItem`.
+If ``APIFY_TOKEN`` and an actor id are resolvable (the source's specific
+``APIFY_ACTOR_<SOURCE>`` env var, or the shared ``APIFY_DEFAULT_ACTOR`` /
+``APIFY_ACTOR`` default) *and* the network is reachable, this connector triggers
+the Apify actor run, waits for it to finish, downloads the dataset items, and
+maps each item into a :class:`~app.models.SourceItem`.
 
 If any prerequisite is missing, or any network / HTTP error occurs, it logs a
 warning and returns ``[]`` - the app then falls back to the seeded / sample
 data. It never fabricates listings.
+
+The dataset -> ``SourceItem`` mapping is intentionally **tolerant**: it does not
+assume any particular actor schema. It probes a wide set of common field names
+to build a human-readable text blob, and *always* appends a compact JSON dump of
+the full record so the downstream deterministic pipeline never loses data and
+never silently produces empty deals. The mapping helpers (:func:`map_apify_item`
+and :func:`pick_first`) are pure and unit-testable.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Optional
 
-from ..models import SourceItem
+from ..models import SourceItem, SourceType
+from ..sources import SourceEntry, build_listing_url, resolve_actor
 from .base import Connector
 
 logger = logging.getLogger("app.connectors.apify")
@@ -27,8 +37,154 @@ _APIFY_BASE = "https://api.apify.com/v2"
 _DEFAULT_TIMEOUT = 60
 
 
+# --- Tolerant field probing -------------------------------------------------
+
+#: Ordered groups of common field names probed to build a human-readable blob.
+#: One value (the first present) is taken from each group, in this order.
+_TEXT_FIELD_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("title", "name", "heading"),
+    ("description", "summary", "body", "details"),
+    ("price", "askingPrice", "asking_price"),
+    ("revenue", "turnover"),
+    ("profit", "ebitda", "netProfit"),
+    ("location", "state", "suburb", "address"),
+    ("sector", "industry", "category"),
+)
+
+#: Common keys (in priority order) that carry a listing URL or id.
+_EXTERNAL_REF_KEYS: tuple[str, ...] = (
+    "url",
+    "link",
+    "listingUrl",
+    "listing_url",
+    "href",
+    "detailUrl",
+    "id",
+    "listingId",
+    "external_id",
+)
+
+
+def _coerce_scalar(value: Any) -> str:
+    """Coerce an arbitrary value to a clean string (safe for any JSON type)."""
+
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else str(value)
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
+def pick_first(item: dict[str, Any], keys: tuple[str, ...] | list[str]) -> Optional[str]:
+    """Return the first present, non-empty value among ``keys`` (as a string).
+
+    Values are coerced safely: strings are stripped, numbers/bools stringified,
+    and nested dict/list values JSON-encoded. Empty / whitespace-only values are
+    skipped. Returns ``None`` when nothing usable is found.
+    """
+
+    if not isinstance(item, dict):
+        return None
+    for key in keys:
+        if key not in item:
+            continue
+        text = _coerce_scalar(item.get(key))
+        if text:
+            return text
+    return None
+
+
+def _human_blob(item: dict[str, Any]) -> str:
+    """Concatenate the first value from each common field group, when present."""
+
+    parts: list[str] = []
+    for group in _TEXT_FIELD_GROUPS:
+        value = pick_first(item, group)
+        if value:
+            parts.append(value)
+    return "\n".join(parts)
+
+
+def _json_dump(item: dict[str, Any]) -> str:
+    """Compact, deterministic JSON dump of the full record (never raises)."""
+
+    try:
+        return json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return str(item)
+
+
+def has_signal(item: dict[str, Any]) -> bool:
+    """Return ``True`` when a record carries any recognizable listing signal.
+
+    A record with neither an external ref/id nor any known content field is
+    treated as junk and skipped (so truly-empty records never become deals).
+    """
+
+    if not isinstance(item, dict):
+        return False
+    if pick_first(item, _EXTERNAL_REF_KEYS):
+        return True
+    return any(pick_first(item, group) for group in _TEXT_FIELD_GROUPS)
+
+
+def _structured_passthrough(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Carry through structured hints for the pipeline (never fabricated).
+
+    If the actor already emitted a ``structured`` dict, use it; otherwise hand
+    the whole record (minus ``raw_text``) to the handlers as structured input.
+    """
+
+    structured = item.get("structured")
+    if isinstance(structured, dict):
+        return structured or None
+    passthrough = {k: v for k, v in item.items() if k != "raw_text"}
+    return passthrough or None
+
+
+def map_apify_item(item: dict[str, Any], source: SourceEntry) -> SourceItem:
+    """Map one Apify dataset record into a :class:`SourceItem` (pure).
+
+    * ``source_name`` / ``source_type`` come from the registry entry.
+    * ``external_listing_id_or_url`` is the first present of the common URL/id
+      keys; a bare id is combined with the source ``base_url`` via
+      :func:`~app.sources.build_listing_url`.
+    * ``raw_text`` is a human-readable blob of common fields **plus** an always-
+      present compact JSON dump of the full record, so downstream extraction
+      never loses data.
+    * Structured hints are carried through when available; the pipeline remains
+      the source of truth (missing values stay null - nothing is fabricated).
+    """
+
+    raw_ref = pick_first(item, _EXTERNAL_REF_KEYS)
+    external = build_listing_url(source.key, raw_ref)
+
+    blob = _human_blob(item)
+    dump = _json_dump(item)
+    raw_text = f"{blob}\n{dump}" if blob else dump
+
+    return SourceItem(
+        source_name=source.display_name,
+        source_type=source.source_type.value,
+        raw_text=raw_text,
+        structured=_structured_passthrough(item),
+        external_listing_id_or_url=external,
+    )
+
+
 class ApifyConnector(Connector):
-    """Fetch listings for a source via its configured Apify actor."""
+    """Fetch listings for a source via its resolved Apify actor."""
 
     def __init__(self, source_key: str, registry=None) -> None:
         super().__init__(source_key, registry)
@@ -36,7 +192,17 @@ class ApifyConnector(Connector):
 
     @property
     def actor_id(self) -> Optional[str]:
-        return self.entry.apify_actor_id if self.entry else None
+        """Resolve actor id: source-specific env var -> default actor -> None."""
+
+        actor, _ = resolve_actor(self.source_key)
+        return actor
+
+    @property
+    def actor_source(self) -> str:
+        """Where the actor id came from: ``specific`` / ``default`` / ``none``."""
+
+        _, source = resolve_actor(self.source_key)
+        return source
 
     def is_configured(self) -> bool:
         return bool(self.token and self.actor_id and self.entry)
@@ -87,54 +253,22 @@ class ApifyConnector(Connector):
     def map_items(self, dataset_items: list[dict[str, Any]]) -> list[SourceItem]:
         """Map raw Apify dataset records into :class:`SourceItem` objects.
 
-        Mapping is conservative: only fields that are present are carried, and
-        the source name/type come from the registry entry (never invented).
+        Non-dict records and records carrying no recognizable listing signal are
+        skipped; every other record is mapped tolerantly via
+        :func:`map_apify_item`.
         """
 
+        source = self.entry or SourceEntry(
+            key=self.source_key,
+            display_name=self.source_key,
+            source_type=SourceType.marketplace,
+            base_url="",
+        )
         items: list[SourceItem] = []
-        source_name = self.entry.display_name if self.entry else self.source_key
-        source_type = self.entry.source_type.value if self.entry else "marketplace"
-
         for rec in dataset_items:
             if not isinstance(rec, dict):
                 continue
-            raw_text = self._raw_text(rec)
-            if not raw_text:
+            if not has_signal(rec):
                 continue
-            external = self._external_ref(rec)
-            structured = self._structured(rec)
-            items.append(
-                SourceItem(
-                    source_name=source_name,
-                    source_type=source_type,
-                    raw_text=raw_text,
-                    structured=structured or None,
-                    external_listing_id_or_url=external,
-                )
-            )
+            items.append(map_apify_item(rec, source))
         return items
-
-    @staticmethod
-    def _raw_text(rec: dict[str, Any]) -> str:
-        for key in ("raw_text", "description", "summary", "text", "title", "name"):
-            value = rec.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return ""
-
-    @staticmethod
-    def _external_ref(rec: dict[str, Any]) -> Optional[str]:
-        for key in ("url", "listing_url", "external_listing_id_or_url", "link", "id"):
-            value = rec.get(key)
-            if value is not None and str(value).strip():
-                return str(value).strip()
-        return None
-
-    @staticmethod
-    def _structured(rec: dict[str, Any]) -> dict[str, Any]:
-        # If the actor already emitted a structured payload, pass it through;
-        # otherwise hand the whole record to the handlers as structured input.
-        structured = rec.get("structured")
-        if isinstance(structured, dict):
-            return structured
-        return {k: v for k, v in rec.items() if k != "raw_text"}

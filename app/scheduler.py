@@ -26,11 +26,14 @@ from . import store
 from .connectors import get_connector
 from .models import SourceItem
 from .pipeline import process_batch
-from .sources import REGISTRY
+from .sources import REGISTRY, apify_token_present, resolve_actor
 
 logger = logging.getLogger("app.scheduler")
 
 DEFAULT_SYNC_TIMES = "03:00,03:15,03:30,03:45"
+
+#: Social sources are gated by their own enable-flag + token (not Apify actors).
+_SOCIAL_KEYS = {"linkedin", "facebook_groups"}
 
 _scheduler = None  # APScheduler BackgroundScheduler instance when running.
 
@@ -73,11 +76,36 @@ def parse_sync_times(raw: Optional[str] = None) -> list[tuple[int, int]]:
     return out or [(3, 0)]
 
 
+def _skip_reason(source_key: str) -> str:
+    """Explain why an unconfigured source is skipped: 'no API key' or 'no actor'.
+
+    Social sources and any source lacking an ``APIFY_TOKEN`` report
+    ``"no API key"``; an Apify source that has a token but no resolvable actor
+    reports ``"no actor"``.
+    """
+
+    if source_key in _SOCIAL_KEYS:
+        return "no API key"
+    if not apify_token_present():
+        return "no API key"
+    actor, _ = resolve_actor(source_key)
+    return "no actor" if not actor else "no API key"
+
+
 def run_sync(source_keys: Optional[list[str]] = None) -> dict:
     """Run a sync over the given (or all configured) sources.
 
-    Returns a small result dict ``{processed, item_count, sources}``. Never
-    raises: any connector error is captured into that source's job status.
+    Returns a small result dict ``{processed, item_count, produced_deal_count,
+    sources}``. Never raises: any connector error is captured into that source's
+    job status. Per-source messages are explicit:
+
+    * ``"success: N items"``               - N (> 0) items fetched.
+    * ``"fetched 0 items (actor returned nothing)"`` - configured but empty.
+    * ``"skipped: no API key"`` / ``"skipped: no actor"`` - not configured.
+    * ``"error: <msg>"``                   - the connector raised.
+
+    All configured sources' items are combined and ``process_batch`` runs once;
+    the produced-deal count is then attributed back to each source.
     """
 
     store.init_db()
@@ -92,7 +120,10 @@ def run_sync(source_keys: Optional[list[str]] = None) -> dict:
 
         connector = get_connector(key)
         if not connector.is_configured():
-            store.upsert_job(key, job_name, "skipped", message="skipped: no API key")
+            store.upsert_job(
+                key, job_name, "skipped",
+                message=f"skipped: {_skip_reason(key)}",
+            )
             continue
 
         store.upsert_job(key, job_name, "running", started_at=_now_iso(), message=f"syncing {display}")
@@ -105,6 +136,16 @@ def run_sync(source_keys: Optional[list[str]] = None) -> dict:
             )
             continue
 
+        fetched = len(items)
+        if fetched == 0:
+            store.upsert_job(
+                key, job_name, "success",
+                finished_at=_now_iso(), last_sync_at=_now_iso(),
+                item_count=0, fetched_count=0, produced_deal_count=0,
+                message="fetched 0 items (actor returned nothing)",
+            )
+            continue
+
         combined.extend(items)
         processed_sources.append(key)
         store.upsert_job(
@@ -113,19 +154,43 @@ def run_sync(source_keys: Optional[list[str]] = None) -> dict:
             "success",
             finished_at=_now_iso(),
             last_sync_at=_now_iso(),
-            item_count=len(items),
-            message=f"success: {len(items)} items",
+            item_count=fetched,
+            fetched_count=fetched,
+            message=f"success: {fetched} items",
         )
 
+    produced_total = 0
     if combined:
         try:
             output = process_batch(combined)
             store.save_snapshot(output)
+            produced_total = len(output.deals)
+            # Attribute produced deals back to each source by display name.
+            counts: dict[str, int] = {}
+            for deal in output.deals:
+                counts[deal.source_name] = counts.get(deal.source_name, 0) + 1
+            for key in processed_sources:
+                entry = REGISTRY.get(key)
+                display = entry.display_name if entry else key
+                store.upsert_job(
+                    key, f"sync:{key}", "success",
+                    produced_deal_count=counts.get(display, 0),
+                )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("process_batch failed during sync: %s", exc)
-            return {"processed": False, "item_count": len(combined), "sources": processed_sources}
+            return {
+                "processed": False,
+                "item_count": len(combined),
+                "produced_deal_count": 0,
+                "sources": processed_sources,
+            }
 
-    return {"processed": bool(combined), "item_count": len(combined), "sources": processed_sources}
+    return {
+        "processed": bool(combined),
+        "item_count": len(combined),
+        "produced_deal_count": produced_total,
+        "sources": processed_sources,
+    }
 
 
 def start_scheduler() -> bool:

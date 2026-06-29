@@ -14,6 +14,8 @@ from app.sources import (
     REGISTRY,
     actor_env_var,
     apify_token_present,
+    default_actor_id,
+    resolve_actor,
     source_config_status,
 )
 
@@ -21,6 +23,8 @@ from app.sources import (
 # Env vars that, when present, would make a source look "configured".
 _CRED_VARS = (
     "APIFY_TOKEN",
+    "APIFY_DEFAULT_ACTOR",
+    "APIFY_ACTOR",
     "LINKEDIN_INGEST_ENABLED",
     "LINKEDIN_API_TOKEN",
     "FACEBOOK_INGEST_ENABLED",
@@ -119,6 +123,79 @@ def test_status_includes_twelve_apify_sources(monkeypatch):
     assert len(apify) == 12
 
 
+# --- Actor resolution priority: specific > default > none --------------------
+
+def test_resolve_actor_prefers_specific_over_default(monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_DEFAULT_ACTOR", "acme/shared")
+    monkeypatch.setenv("APIFY_ACTOR_BSALE", "acme/bsale-specific")
+    actor, source = resolve_actor("bsale")
+    assert actor == "acme/bsale-specific"
+    assert source == "specific"
+
+
+def test_resolve_actor_falls_back_to_default(monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_DEFAULT_ACTOR", "acme/shared")
+    monkeypatch.delenv("APIFY_ACTOR_RESOLVE", raising=False)
+    actor, source = resolve_actor("resolve")
+    assert actor == "acme/shared"
+    assert source == "default"
+
+
+def test_resolve_actor_apify_alias_used_when_default_unset(monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_ACTOR", "acme/legacy-alias")
+    actor, source = resolve_actor("bsale")
+    assert actor == "acme/legacy-alias"
+    assert source == "default"
+    assert default_actor_id() == "acme/legacy-alias"
+
+
+def test_resolve_actor_none_when_nothing_set(monkeypatch):
+    _clear_creds(monkeypatch)
+    actor, source = resolve_actor("bsale")
+    assert actor is None
+    assert source == "none"
+
+
+def test_status_configured_via_default_actor_without_leaking_id(monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_TOKEN", "secret-token")
+    monkeypatch.setenv("APIFY_DEFAULT_ACTOR", "acme/shared-actor")
+    # No source-specific actor env vars are set.
+    statuses = {s["key"]: s for s in source_config_status()}
+
+    bsale = statuses["bsale"]
+    # A single default actor makes every Apify source live.
+    assert bsale["configured"] is True
+    assert bsale["actor_source"] == "default"
+    assert bsale["resolved_actor_id_present"] is True
+    # The recommended specific env var name is still surfaced ...
+    assert bsale["actor_env_var"] == "APIFY_ACTOR_BSALE"
+    # ... and the actual actor id value is NEVER leaked anywhere in the status.
+    assert "acme/shared-actor" not in repr(bsale)
+
+
+def test_status_specific_actor_takes_priority_over_default(monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_TOKEN", "secret-token")
+    monkeypatch.setenv("APIFY_DEFAULT_ACTOR", "acme/shared-actor")
+    monkeypatch.setenv("APIFY_ACTOR_BSALE", "acme/bsale-specific")
+    statuses = {s["key"]: s for s in source_config_status()}
+    assert statuses["bsale"]["actor_source"] == "specific"
+    assert statuses["resolve"]["actor_source"] == "default"
+
+
+def test_status_actor_source_none_without_any_actor(monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_TOKEN", "secret-token")  # token but no actor at all
+    statuses = {s["key"]: s for s in source_config_status()}
+    assert statuses["bsale"]["actor_source"] == "none"
+    assert statuses["bsale"]["resolved_actor_id_present"] is False
+    assert statuses["bsale"]["configured"] is False
+
+
 # --- GET /api/sources --------------------------------------------------------
 
 def test_api_sources_lists_all_sources_with_fields(client):
@@ -161,3 +238,18 @@ def test_sync_marks_unconfigured_sources_skipped(client, monkeypatch):
     skipped = [j for j in jobs if j["status"] == "skipped"]
     assert skipped, "expected skipped jobs when no credentials are present"
     assert all(j["message"] == "skipped: no API key" for j in skipped)
+
+
+def test_sync_marks_token_without_actor_as_no_actor(client, monkeypatch):
+    _clear_creds(monkeypatch)
+    monkeypatch.setenv("APIFY_TOKEN", "secret-token")  # token present, no actors
+    from app.scheduler import run_sync
+
+    run_sync()
+    jobs = client.get("/api/status").json()["jobs"]
+    apify_skipped = [
+        j for j in jobs
+        if j["status"] == "skipped" and j["source_key"] not in {"linkedin", "facebook_groups"}
+    ]
+    assert apify_skipped
+    assert all(j["message"] == "skipped: no actor" for j in apify_skipped)

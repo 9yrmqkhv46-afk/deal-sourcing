@@ -21,10 +21,18 @@ services:
       # Set real values in the Render dashboard's Environment tab.
       - key: APIFY_TOKEN
         sync: false
+      # Shared DEFAULT actor: a single uploaded Apify actor that drives ANY
+      # source lacking its own dedicated APIFY_ACTOR_<SOURCE> below. Set either
+      # APIFY_DEFAULT_ACTOR (preferred) or APIFY_ACTOR and every source becomes
+      # live once APIFY_TOKEN is also set. Per-source actors still take priority.
+      - key: APIFY_DEFAULT_ACTOR
+        sync: false
+      - key: APIFY_ACTOR
+        sync: false
       # Per-source Apify actor ids. One APIFY_ACTOR_<SOURCE> per registered
       # source; declared here (sync:false) so they appear in Render's dashboard
-      # ready to fill in. A source stays idle until APIFY_TOKEN + its actor id
-      # are both set.
+      # ready to fill in. A source stays idle until APIFY_TOKEN + an actor id
+      # (its own or the shared default above) are both set.
       - key: APIFY_ACTOR_BUSINESSFORSALE_AU
         sync: false
       - key: APIFY_ACTOR_BSALE
