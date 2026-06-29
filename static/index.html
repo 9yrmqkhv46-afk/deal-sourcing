@@ -24,7 +24,11 @@
     </div>
 
     <div class="toolbar" role="toolbar" aria-label="Dashboard actions">
-      <button id="load-sample" class="btn btn-primary" type="button">
+      <button id="refresh-now" class="btn btn-primary" type="button">
+        <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 5.5A6.5 6.5 0 103.7 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M16 3v3h-3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Refresh now
+      </button>
+      <button id="load-sample" class="btn" type="button">
         <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.2-3.2M10 12l3.2-3.2M4 15h12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Load sample data
       </button>
@@ -42,6 +46,15 @@
       </button>
     </div>
   </header>
+
+  <!-- ===================== Sync status bar ===================== -->
+  <div id="sync-bar" class="sync-bar" aria-label="Live ingestion status">
+    <span class="sync-status">
+      <span class="sync-dot" id="sync-pulse" aria-hidden="true"></span>
+      <span id="last-synced">Last synced: never</span>
+    </span>
+    <div id="job-badges" class="job-badges" aria-label="Per-source sync status"></div>
+  </div>
 
   <main id="main">
     <!-- ===================== KPI summary ===================== -->

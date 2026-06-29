@@ -19,7 +19,35 @@ from .ingestion import load_batch
 from .models import ProcessOutput, SourceItem
 from .normalizer import normalize_company, normalize_deal, normalize_founders
 from .router import route
+from .sources import build_listing_url, resolve_source_key
 from .validator import is_strict_valid_json
+
+
+def enrich_output(output: ProcessOutput) -> ProcessOutput:
+    """Attach a ``listing_url`` to every deal and a usable link to contacts.
+
+    This is a pure post-process step: it adds ``listing_url`` *inside* deal
+    objects (never a new top-level key) and back-fills
+    ``portal_url_or_website`` on contacts that lack any link, using the source
+    registry's ``build_listing_url``. Deals whose external ref is already a full
+    URL keep that URL unchanged.
+    """
+
+    for deal in output.deals:
+        key = resolve_source_key(deal.source_name) or ""
+        deal.listing_url = build_listing_url(key, deal.external_listing_id_or_url)
+
+    def _backfill(contacts):
+        for c in contacts:
+            if not (c.portal_url_or_website or c.linkedin_url):
+                key = resolve_source_key(c.source_name) or ""
+                url = build_listing_url(key, None)
+                if url:
+                    c.portal_url_or_website = url
+
+    _backfill(output.contacts)
+    _backfill(output.summary.top_contacts_for_outreach)
+    return output
 
 
 def process_batch(
@@ -61,6 +89,7 @@ def process_batch(
 
     contacts = build_contacts(rf_list, founders_list)
     output = assemble(records, contacts)
+    output = enrich_output(output)
 
     assert is_strict_valid_json(output), "assembled output failed strict JSON validation"
     return output

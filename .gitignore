@@ -24,3 +24,7 @@ htmlcov/
 *.swp
 .idea/
 .vscode/
+
+# Local data / SQLite persistence
+data/
+*.db

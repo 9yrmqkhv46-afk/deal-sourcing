@@ -276,6 +276,36 @@ deal-sourcing/                      <- repo root
 
 ---
 
+## Live Ingestion, Scheduling & Persistence (tasks 20+)
+
+- [x] 20. Add the source registry and listing-URL builder (`app/sources.py`)
+  - Define `SourceRegistry` with the 10 specified platforms + existing Scaling source + credential-gated LinkedIn and Facebook Groups social sources; each entry carries `key`, `display_name`, `source_type`, `base_url`, optional `apify_actor_id` (read from `APIFY_ACTOR_<SOURCE>`).
+  - Implement `build_listing_url(source_key, ext)` (pass-through full URLs; else join base_url) and `resolve_source_key(source_name)`.
+  - _Tests: `tests/test_sources.py`._
+
+- [x] 21. Add credential-gated connectors (`app/connectors/`)
+  - `base.py` `Connector` ABC (`fetch() -> list[SourceItem]`), `apify_connector.py` (Apify run + dataset-items via `requests`, maps to `SourceItem`s, no-op on missing creds/network/HTTP error), `linkedin_connector.py` and `facebook_connector.py` (generic, ToS-compliant, credential-gated; no scraping/anti-bot logic), plus a `source_key -> connector` registry.
+  - _Tests: `tests/test_connectors.py`._
+
+- [x] 22. Add SQLite persistence (`app/store.py`)
+  - `init_db`, `save_snapshot`, `load_latest_snapshot`, `upsert_job`, `get_job_statuses`, `get_overall_last_sync`; `snapshots` + `sync_jobs` tables; DB path from `DATABASE_PATH`; seed-if-empty on startup.
+  - _Tests: `tests/test_store.py`._
+
+- [x] 23. Add the APScheduler daily sync (`app/scheduler.py`)
+  - `BackgroundScheduler` daily cron at `SYNC_TIMES` (default 03:00/03:15/03:30/03:45); `run_sync` fetches configured sources, runs `process_batch`, saves a snapshot, updates job status; guarded by `SCHEDULER_ENABLED`; disabled under tests; never crashes on connector failure.
+
+- [x] 24. Wire new API endpoints + lifespan + listing_url enrichment (`app/main.py`, `app/pipeline.py`, `app/models.py`)
+  - Add `POST /api/refresh`, `GET /api/status`, `POST /api/sync`; FastAPI lifespan seeds the DB and starts the scheduler; add `listing_url` inside deal objects and a usable link on contacts via a pure post-process step (top-level strict keys unchanged).
+  - _Tests: `tests/test_refresh_api.py`._
+
+- [x] 25. Add the UI refresh controls and original-site links (`static/`)
+  - "Refresh now" button calls `POST /api/refresh`; status bar shows "Last synced at HH:MM" + per-source job badges; poll `GET /api/status` every ~30s; deal rows/drawer and contact cards render "View on original site ↗" (`target=_blank rel="noopener noreferrer"`) when a URL exists.
+
+- [x] 26. Deps + docs
+  - `requirements.txt` adds `apscheduler` + `requests`; `.gitignore` adds `data/` + `*.db`; `README.md` documents the new env vars (set in Render's Environment tab), the daily schedule, the refresh-re-queries-DB behaviour, and the LinkedIn/Facebook ToS/compliance note.
+
+---
+
 ## Task Dependency Graph
 
 ```mermaid

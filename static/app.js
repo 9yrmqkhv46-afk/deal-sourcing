@@ -41,6 +41,12 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/* "View on original site" external link, or "" when no URL is available. */
+function originalSiteLink(url, label) {
+  if (!url) return "";
+  return `<a class="link link-external" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label || "View on original site")} ↗</a>`;
+}
+
 function fmtMoney(amount, currency, estimated) {
   if (amount == null) return "—";
   const n = Number(amount).toLocaleString("en-AU", { maximumFractionDigits: 0 });
@@ -115,6 +121,76 @@ async function processBatch(batch, opts = {}) {
     return false;
   } finally {
     hideLoading();
+  }
+}
+
+/* ---------------------------- refresh + status ------------------------- */
+
+function fmtSyncTime(iso) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "never";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function renderStatus(meta) {
+  if (!meta) return;
+  const last = meta.last_synced_at;
+  $("#last-synced").textContent = last
+    ? "Last synced at " + fmtSyncTime(last)
+    : "Last synced: never";
+
+  const jobs = meta.jobs || [];
+  const running = jobs.some((j) => j.status === "running");
+  $("#sync-pulse").classList.toggle("live", running);
+
+  $("#job-badges").innerHTML = jobs
+    .map((j) => {
+      const status = (j.status || "idle").toLowerCase();
+      const name = j.source_key || j.job_name || "source";
+      const count = j.item_count ? ` ${j.item_count}` : "";
+      const title = [j.job_name, j.message, j.last_sync_at ? "last: " + j.last_sync_at : ""]
+        .filter(Boolean).join(" — ");
+      return `<span class="job-badge job-${status}" title="${escapeHtml(title)}">
+        <span class="job-badge-dot"></span>${escapeHtml(name)}${escapeHtml(count)}</span>`;
+    })
+    .join("") || '<span class="job-badge job-idle"><span class="job-badge-dot"></span>no sources yet</span>';
+}
+
+async function refreshNow() {
+  showLoading("Refreshing from latest synced data…");
+  try {
+    const res = await fetch("/api/refresh", { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const body = await res.json();
+    // The refresh envelope contains the strict output keys + sync metadata.
+    state.data = {
+      deals: body.deals || [],
+      companies: body.companies || [],
+      founders: body.founders || [],
+      contacts: body.contacts || [],
+      summary: body.summary || {},
+    };
+    buildFilterOptions();
+    render();
+    renderStatus({ last_synced_at: body.last_synced_at, jobs: body.jobs });
+    toast("Refreshed — " + state.data.deals.length + " deals from latest snapshot", "ok");
+  } catch (err) {
+    toast("Refresh failed: " + err.message, "error");
+  } finally {
+    hideLoading();
+  }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch("/api/status");
+    if (!res.ok) return;
+    renderStatus(await res.json());
+  } catch (_err) {
+    /* status polling is best-effort; ignore transient errors */
   }
 }
 
@@ -287,14 +363,18 @@ function renderDeals() {
         <td>${scoreBar(tm)}</td>
         <td>${classBadge(tm.classification)}</td>
         <td>${filterDots(tm)}</td>
-        <td><span class="source-tag">${escapeHtml(titleCase(d.source_type))}</span></td>
+        <td><span class="source-tag">${escapeHtml(titleCase(d.source_type))}</span>${d.listing_url ? `<div class="cell-sub">${originalSiteLink(d.listing_url, "Original site")}</div>` : ""}</td>
       </tr>`;
     })
     .join("");
 
   $$("#deals-body tr").forEach((tr) => {
     const open = () => openDrawer(tr.dataset.deal);
-    tr.addEventListener("click", open);
+    tr.addEventListener("click", (e) => {
+      // Let external "original site" links work without opening the drawer.
+      if (e.target.closest("a")) return;
+      open();
+    });
     tr.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
     });
@@ -373,7 +453,7 @@ function renderContacts() {
         c.linkedin_url ? `<a class="link" href="${escapeHtml(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn</a>` : "",
         c.email ? `<a class="link" href="mailto:${escapeHtml(c.email)}">Email</a>` : "",
         c.phone ? `<a class="link" href="tel:${escapeHtml(c.phone)}">${escapeHtml(c.phone)}</a>` : "",
-        c.portal_url_or_website ? `<a class="link" href="${escapeHtml(c.portal_url_or_website)}" target="_blank" rel="noopener">Source</a>` : "",
+        originalSiteLink(c.portal_url_or_website || c.linkedin_url, "View on original site"),
       ].filter(Boolean).join("");
       const sector = c.sector_focus ? `<span><b>Focus</b> ${escapeHtml(c.sector_focus)}</span>` : "";
       const src = `<span><b>Source</b> ${escapeHtml(titleCase(c.source_type))} · ${escapeHtml(c.source_name)}</span>`;
@@ -476,6 +556,7 @@ function openDrawer(dealId) {
         ${di("Source", escapeHtml(titleCase(d.source_type)) + " · " + escapeHtml(d.source_name))}
         ${di("Reference", escapeHtml(d.external_listing_id_or_url))}
       </div>
+      ${d.listing_url ? `<div class="d-section-links">${originalSiteLink(d.listing_url)}</div>` : ""}
     </div>
 
     ${d.raw_source_excerpt ? `<div class="d-section"><h3>Raw source excerpt</h3><div class="d-note d-excerpt">${escapeHtml(d.raw_source_excerpt)}</div></div>` : ""}
@@ -576,6 +657,7 @@ function switchTab(name) {
 /* ---------------------------- wiring ----------------------------------- */
 
 function bindEvents() {
+  $("#refresh-now").addEventListener("click", refreshNow);
   $("#load-sample").addEventListener("click", loadSample);
   $("#open-process").addEventListener("click", openModal);
   $("#export-json").addEventListener("click", exportJson);
@@ -613,5 +695,8 @@ function bindEvents() {
 }
 
 bindEvents();
-// Auto-load the sample on first paint so the dashboard looks alive immediately.
-loadSample();
+// On first paint, load the latest synced snapshot from the DB so the dashboard
+// reflects persisted state. Then keep the per-source status badges fresh.
+refreshNow();
+pollStatus();
+setInterval(pollStatus, 30000);

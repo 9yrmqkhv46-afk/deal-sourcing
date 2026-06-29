@@ -10,3 +10,24 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.15
+      # --- Live ingestion, scheduling & persistence ---
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: SYNC_TIMES
+        value: "03:00,03:15,03:30,03:45"
+      - key: DATABASE_PATH
+        value: ./data/deal_sourcing.db
+      # Credential-gated connectors (leave unset to keep live ingestion idle).
+      # Set real values in the Render dashboard's Environment tab.
+      - key: APIFY_TOKEN
+        sync: false
+      - key: LINKEDIN_INGEST_ENABLED
+        value: "false"
+      - key: LINKEDIN_API_TOKEN
+        sync: false
+      - key: FACEBOOK_INGEST_ENABLED
+        value: "false"
+      - key: FACEBOOK_API_TOKEN
+        sync: false
+      - key: FACEBOOK_GROUP_IDS
+        sync: false

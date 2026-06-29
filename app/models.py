@@ -142,6 +142,7 @@ class Deal(BaseModel):
     source_name: str
     source_type: SourceType
     external_listing_id_or_url: str
+    listing_url: Optional[str] = None
     title: str
     description: Optional[str] = None
     deal_type: DealType = DealType.sale

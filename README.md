@@ -38,10 +38,78 @@ Each `deal` embeds a `thesis_match` with the five tri-state filters, an
 ```
 app/          FastAPI app + pure pipeline (ingestion, routing, handlers,
               normalizer, scoring, contacts, assembler, validator, pipeline)
+app/connectors/  Credential-gated live-ingestion connectors (Apify, LinkedIn,
+              Facebook Groups) — pure data adapters into the existing pipeline
+app/sources.py   Source registry + listing-URL builder
+app/store.py     SQLite persistence (snapshots + sync-job status)
+app/scheduler.py APScheduler daily sync routine
 static/       Dashboard (index.html, app.js, styles.css) — no build step
 tests/        pytest unit tests + hypothesis property tests (P1–P17)
 requirements.txt, render.yaml, Procfile, .gitignore
 ```
+
+## Live ingestion, scheduling & persistence
+
+The core `/api/process` path remains pure, deterministic and **non-scraping**.
+Live ingestion is an additive, **credential-gated** layer that degrades
+gracefully: with no credentials (and the sandbox has none) every connector
+**no-ops and returns no data**, and the app falls back to the seeded sample
+snapshot. Connectors never fabricate listings.
+
+- **Connectors** (`app/connectors/`) are pure adapters returning `SourceItem`s
+  for the existing pipeline. `ApifyConnector` calls an Apify actor only when
+  `APIFY_TOKEN` and the source's actor id are set and the network is reachable;
+  on any missing-credential / network / HTTP error it logs a warning and
+  returns `[]`.
+- **Scheduler** (`app/scheduler.py`) runs daily syncs at fixed times via
+  APScheduler. A sync fetches each configured source, runs `process_batch` over
+  the combined batch, and persists a snapshot. The scheduler is disabled
+  automatically during tests.
+- **Persistence** (`app/store.py`) stores the latest processed snapshot and
+  per-source job status in SQLite. On startup, if the DB is empty it is seeded
+  by processing the bundled sample batch so the dashboard is populated before
+  any live sync.
+- **Refresh** re-queries the DB (`/api/refresh`) — it does **not** trigger a
+  scrape. The dashboard's "Refresh now" button calls it and polls
+  `/api/status` every ~30s to keep per-source badges fresh.
+
+### Environment variables (set these in Render's **Environment** tab)
+
+This service is deployed on **Render**; configure the following in the Render
+service's **Environment** tab (none are required — without them live ingestion
+simply stays idle and the seeded sample data is served):
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DATABASE_PATH` | SQLite file path | `./data/deal_sourcing.db` |
+| `SCHEDULER_ENABLED` | Enable the daily scheduler | `true` |
+| `SYNC_TIMES` | Comma-separated `HH:MM` daily sync times | `03:00,03:15,03:30,03:45` |
+| `APIFY_TOKEN` | Apify API token for live actors | _(unset → no-op)_ |
+| `APIFY_ACTOR_<SOURCE>` | Per-source Apify actor id (e.g. `APIFY_ACTOR_BSALE`) | _(unset → no-op)_ |
+| `LINKEDIN_INGEST_ENABLED` | Enable the LinkedIn connector | `false` |
+| `LINKEDIN_API_TOKEN` | Token for your authorized LinkedIn source | _(unset → no-op)_ |
+| `FACEBOOK_INGEST_ENABLED` | Enable the Facebook Groups connector | `false` |
+| `FACEBOOK_API_TOKEN` | Token for your authorized Facebook Graph API app | _(unset → no-op)_ |
+| `FACEBOOK_GROUP_IDS` | Comma-separated ids/urls of groups you are authorized to read | _(unset → no-op)_ |
+| `FACEBOOK_KEYWORDS` | Optional keyword allow-list passed to your authorized actor | _(unset)_ |
+
+The daily schedule defaults to **03:00, 03:15, 03:30 and 03:45** server time
+and is configurable via `SYNC_TIMES`.
+
+### Compliance note — LinkedIn & Facebook (IMPORTANT)
+
+The LinkedIn and Facebook connectors ship as **generic, credential-gated
+interfaces only**. They contain **no scraping logic** and **no anti-bot /
+protection-bypass behaviour**.
+
+Live ingestion from these platforms must use **your OWN authorized source** —
+the platform's official API under an approved application, or an authorized
+Apify actor you are entitled to run — and must comply with each platform's
+**Terms of Service** and applicable law. For Facebook Groups specifically, you
+must only target groups you administer or are otherwise authorized to access,
+and you must supply those group ids/urls yourself via `FACEBOOK_GROUP_IDS`. This
+project will not access content you are not authorized to read and does not
+provide a list of third-party groups to scrape.
 
 ## Run locally
 
@@ -61,6 +129,9 @@ Then open <http://localhost:8000> and click **Load sample data**.
 - `GET  /` — dashboard
 - `POST /api/process` — body `{ "batch": [ ...source items... ], "config": { ...overrides? } }` → strict JSON output
 - `GET  /api/sample` — bundled demo batch
+- `POST /api/refresh` — re-query the latest DB snapshot (NOT a scrape) → strict keys + `last_synced_at` + `jobs`
+- `GET  /api/status` — `{ last_synced_at, jobs: [...] }` per-source sync status
+- `POST /api/sync` — manually trigger a background sync (credential-gated sources still no-op safely)
 - `GET  /api/health` — liveness probe
 
 Example:

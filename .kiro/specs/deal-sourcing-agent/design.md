@@ -970,3 +970,69 @@ isStrictValidJSON(out) AND keys(out) = {deals, companies, founders, contacts, su
 - No external network services, databases, or live scrapers are required by the agent itself; the downstream
   ETL/DB/CRM are out of scope for this component.
 ```
+
+
+## Live Ingestion, Scheduling & Persistence
+
+This section describes an **additive** layer that surrounds the existing pure
+pipeline without changing its contract. The synchronous `/api/process` path
+remains deterministic and non-scraping; live ingestion is opt-in, fully
+credential-gated, and degrades to the seeded sample data when unconfigured.
+
+### Source registry (`app/sources.py`)
+
+A `SourceRegistry` enumerates ingestible platforms, each with `key`,
+`display_name`, `source_type`, `base_url`, and an optional Apify actor id read
+from `APIFY_ACTOR_<SOURCE>`. Registered platforms: BusinessForSale.com.au,
+Bsale, AnyBusiness, AllBusiness.com.au, LINK Business Brokers, SBX Business
+Brokers, Resolve Marketplace, Benchmark Business, BusinessesForSale.com
+Australia, Franchise2Sell, the existing Scaling marketplace, plus credential-
+gated LinkedIn and Facebook Groups social sources. `build_listing_url(key, ext)`
+returns a full URL unchanged or joins `base_url` with an id/path, and is used to
+attach a `listing_url` field **inside** each deal object (never a new top-level
+key) and a usable link on contacts.
+
+### Connectors (`app/connectors/`)
+
+A `Connector` ABC defines `fetch() -> list[SourceItem]`. All connectors are pure
+data adapters feeding the existing pipeline and must no-op (return `[]`) on
+missing credentials or any network/HTTP error — never fabricating data.
+
+- `ApifyConnector(source_key)` calls the Apify actor run + dataset-items
+  endpoint via `requests` only when `APIFY_TOKEN` and the source's actor id are
+  set; it maps dataset records to `SourceItem`s.
+- `LinkedInConnector` / `FacebookGroupsConnector` are generic, credential-gated
+  interfaces (no scraping, no protection-bypass) that require the operator's own
+  authorized source and ToS compliance. Facebook additionally requires an
+  explicit operator-supplied list of authorized group ids.
+
+### Persistence (`app/store.py`)
+
+Standard-library `sqlite3`, DB path from `DATABASE_PATH` (default
+`./data/deal_sourcing.db`). A `snapshots` table stores the latest processed
+`ProcessOutput` as JSON; a `sync_jobs` table tracks per-source status
+(`idle|running|success|error|skipped`, timestamps, `item_count`, `message`). On
+startup an empty DB is seeded by processing the bundled sample batch.
+
+### Scheduler (`app/scheduler.py`)
+
+APScheduler `BackgroundScheduler` runs daily cron jobs at `SYNC_TIMES` (default
+03:00/03:15/03:30/03:45). `run_sync(source_keys=None)` fetches each credentialed
+source, runs `process_batch` over the combined batch, saves a snapshot, and
+updates `sync_jobs`. Connector failures never crash the app. The scheduler is
+guarded by `SCHEDULER_ENABLED` and force-disabled under tests.
+
+### API additions (`app/main.py`)
+
+- `POST /api/refresh` re-queries `load_latest_snapshot()` (seeding if empty) and
+  returns the strict keys plus `last_synced_at` and `jobs`.
+- `GET /api/status` returns `last_synced_at` and the per-source job list.
+- `POST /api/sync` triggers `run_sync` as a background task (credential-gated
+  sources still no-op) and returns the current status.
+
+### UI (`static/`)
+
+A "Refresh now" button calls `/api/refresh`, a status bar formats the last sync
+time and renders per-source job badges, and `GET /api/status` is polled every
+~30s. Deal rows/drawer and contact cards render a "View on original site ↗"
+link (`target=_blank rel="noopener noreferrer"`) when a URL is available.

@@ -6,37 +6,87 @@ Routes
 * ``POST /api/process`` -> runs the pipeline over ``{batch, config?}`` and
   returns the strict JSON output contract.
 * ``GET  /api/sample``  -> returns the bundled demo batch.
+* ``POST /api/refresh`` -> re-queries the DB (NOT a re-scrape) and returns the
+  latest snapshot plus ``last_synced_at`` and per-source ``jobs``.
+* ``GET  /api/status``  -> returns ``last_synced_at`` + per-source job status.
+* ``POST /api/sync``    -> manually triggers a background sync (credential-gated
+  sources still no-op safely) and returns the current status.
 * ``GET  /api/health``  -> liveness probe.
 
 The ``ThesisConfig`` is injected per request (with optional overrides from the
-request body) rather than hard-coded into the logic. No outbound network calls
-are made while handling a request.
+request body) rather than hard-coded into the logic. The synchronous
+``/api/process`` path makes no outbound network calls; live ingestion happens
+only via the scheduler / ``/api/sync`` and is fully credential-gated.
 """
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import store
 from .config import load_thesis_config
 from .ingestion import BatchValidationError
 from .models import ProcessRequest
 from .pipeline import process_batch
 from .sample_data import sample_batch
+from .scheduler import run_sync, shutdown_scheduler, start_scheduler
+
+logger = logging.getLogger("app.main")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
+
+def seed_if_empty() -> dict:
+    """Seed the DB by processing the bundled sample batch when it is empty.
+
+    Returns the latest snapshot dict (existing or freshly seeded).
+    """
+
+    store.init_db()
+    snapshot = store.load_latest_snapshot()
+    if snapshot is None:
+        logger.info("DB empty; seeding from bundled sample batch.")
+        output = process_batch(sample_batch())
+        store.save_snapshot(output)
+        store.upsert_job(
+            "seed", "seed:sample", "success",
+            last_sync_at=store.get_overall_last_sync(),
+            item_count=len(output.deals),
+            message="seeded from bundled sample data",
+        )
+        snapshot = store.load_latest_snapshot()
+    return snapshot or {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: ensure DB exists + is seeded, then (optionally) start scheduler.
+    try:
+        seed_if_empty()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Seeding failed at startup: %s", exc)
+    start_scheduler()
+    yield
+    # Shutdown: stop the scheduler cleanly.
+    shutdown_scheduler()
+
+
 app = FastAPI(
     title="Deal-Sourcing & CRM Enrichment Agent (TransformBiz)",
-    version="1.0.0",
+    version="1.1.0",
     description=(
         "Deterministic, non-scraping batch processor that transforms pre-fetched "
-        "source items into a strict JSON deal/contact contract."
+        "source items into a strict JSON deal/contact contract, with credential-"
+        "gated live ingestion, daily scheduling and SQLite persistence."
     ),
+    lifespan=lifespan,
 )
 
 
@@ -75,6 +125,58 @@ def process(request: ProcessRequest) -> JSONResponse:
         raise HTTPException(status_code=400, detail=f"processing error: {exc}") from exc
 
     return JSONResponse(content=output.model_dump(mode="json"))
+
+
+@app.post("/api/refresh")
+def refresh() -> JSONResponse:
+    """Re-query the DB for the latest snapshot (NOT a re-scrape).
+
+    Returns the strict output keys plus ``last_synced_at`` and ``jobs``. If the
+    DB is empty it is seeded from the bundled sample batch first.
+    """
+
+    store.init_db()
+    snapshot = store.load_latest_snapshot()
+    if snapshot is None:
+        snapshot = seed_if_empty()
+
+    body = dict(snapshot)
+    body["last_synced_at"] = store.get_overall_last_sync()
+    body["jobs"] = store.get_job_statuses()
+    return JSONResponse(content=body)
+
+
+@app.get("/api/status")
+def status() -> JSONResponse:
+    """Return the overall last sync time and per-source job status."""
+
+    store.init_db()
+    return JSONResponse(
+        content={
+            "last_synced_at": store.get_overall_last_sync(),
+            "jobs": store.get_job_statuses(),
+        }
+    )
+
+
+@app.post("/api/sync")
+def sync(background_tasks: BackgroundTasks) -> JSONResponse:
+    """Manually trigger a background sync.
+
+    Credential-gated sources still no-op safely. Returns ``accepted`` plus the
+    current job status so the UI can begin polling immediately.
+    """
+
+    store.init_db()
+    background_tasks.add_task(run_sync)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "accepted": True,
+            "last_synced_at": store.get_overall_last_sync(),
+            "jobs": store.get_job_statuses(),
+        },
+    )
 
 
 # Mount static assets last so API routes take precedence.
