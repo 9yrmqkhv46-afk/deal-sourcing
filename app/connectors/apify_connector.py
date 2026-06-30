@@ -183,6 +183,82 @@ def map_apify_item(item: dict[str, Any], source: SourceEntry) -> SourceItem:
     )
 
 
+def run_actor(
+    actor_id: str,
+    run_input: dict[str, Any],
+    token: str,
+    timeout: int = _DEFAULT_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """Run an Apify actor and return its dataset items (list[dict]).
+
+    POSTs ``run_input`` to
+    ``https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items`` with
+    the token as a query parameter, and returns the parsed dataset items.
+
+    This call is intentionally defensive: any missing prerequisite, network /
+    HTTP / timeout / JSON error, or unexpected payload shape degrades to ``[]``
+    with a logged warning. It NEVER raises and NEVER fabricates data, so a
+    single bad actor can never crash a live sync.
+
+    ``actor_id`` may be given in either ``owner/name`` or ``owner~name`` form;
+    it is normalized to the ``~`` form the REST path expects.
+    """
+
+    if not actor_id or not token:
+        logger.warning("run_actor called without actor_id/token; returning no data.")
+        return []
+
+    try:
+        import requests  # local import so the package imports without requests
+    except Exception:  # pragma: no cover - requests is a declared dependency
+        logger.warning("requests not available; run_actor[%s] skipping.", actor_id)
+        return []
+
+    actor = actor_id.replace("/", "~")
+    url = f"{_APIFY_BASE}/acts/{actor}/run-sync-get-dataset-items"
+    try:
+        resp = requests.post(
+            url,
+            params={"token": token},
+            json=run_input or {},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as exc:  # network / HTTP / JSON errors all degrade to []
+        logger.warning("run_actor[%s] failed (%s); returning no data.", actor_id, exc)
+        return []
+
+    if not isinstance(payload, list):
+        logger.warning(
+            "run_actor[%s] unexpected payload type %s; returning no data.",
+            actor_id,
+            type(payload).__name__,
+        )
+        return []
+
+    return [rec for rec in payload if isinstance(rec, dict)]
+
+
+def map_dataset_items(dataset_items: list[dict[str, Any]], source: SourceEntry) -> list[SourceItem]:
+    """Map raw Apify dataset records into :class:`SourceItem` objects (pure).
+
+    Non-dict records and records carrying no recognizable listing signal are
+    skipped; every other record is mapped tolerantly via :func:`map_apify_item`.
+    This is the shared mapping used by both the per-source connector and the
+    registry-driven live sync.
+    """
+
+    items: list[SourceItem] = []
+    for rec in dataset_items:
+        if not isinstance(rec, dict):
+            continue
+        if not has_signal(rec):
+            continue
+        items.append(map_apify_item(rec, source))
+    return items
+
+
 class ApifyConnector(Connector):
     """Fetch listings for a source via its resolved Apify actor."""
 

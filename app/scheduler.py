@@ -193,6 +193,149 @@ def run_sync(source_keys: Optional[list[str]] = None) -> dict:
     }
 
 
+def _actor_timeout() -> int:
+    """Per-actor run timeout in seconds (env-overridable)."""
+
+    raw = os.environ.get("APIFY_ACTOR_TIMEOUT", "")
+    try:
+        value = int(raw)
+        return value if value > 0 else 120
+    except (TypeError, ValueError):
+        return 120
+
+
+def run_live_sync() -> dict:
+    """Run a LIVE sync over the Apify ACTOR_REGISTRY (22 actors).
+
+    Behaviour:
+
+    * If ``APIFY_TOKEN`` is absent, every actor is marked
+      ``"skipped: no API key"`` and nothing else happens - no snapshot is saved,
+      so the snapshot kind is unchanged.
+    * Otherwise every actor is run (via the run-sync-get-dataset-items endpoint).
+      Non-LinkedIn actors contribute :class:`SourceItem` objects; LinkedIn actors
+      contribute :class:`LinkedInPost` objects. Per-actor job rows record
+      ``"success: N items"`` / ``"fetched 0 items"`` / ``"error: <msg>"``. A
+      single actor failure never crashes the sync.
+    * After collecting, ``process_batch`` runs ONCE over all source items, the
+      LinkedIn posts are attached to the snapshot, and the snapshot is saved with
+      ``kind="live_sync"`` and a ``synced_at`` timestamp.
+
+    Returns a small result dict. Never raises.
+    """
+
+    # Local imports keep module import order simple and avoid any cycle risk.
+    from .actors import ACTOR_REGISTRY, resolve_actor_input
+    from .connectors.apify_connector import map_dataset_items, run_actor
+    from .live import map_linkedin_record
+
+    store.init_db()
+
+    token = (os.environ.get("APIFY_TOKEN") or "").strip()
+    if not token:
+        for entry in ACTOR_REGISTRY:
+            store.upsert_job(
+                entry.source_key,
+                f"sync:{entry.source_key}",
+                "skipped",
+                message="skipped: no API key",
+            )
+        return {
+            "processed": False,
+            "item_count": 0,
+            "produced_deal_count": 0,
+            "linkedin_post_count": 0,
+            "actors": [],
+        }
+
+    timeout = _actor_timeout()
+    source_items: list[SourceItem] = []
+    linkedin_posts: list = []
+    ran_actors: list[str] = []
+
+    for entry in ACTOR_REGISTRY:
+        job_name = f"sync:{entry.source_key}"
+        store.upsert_job(
+            entry.source_key, job_name, "running",
+            started_at=_now_iso(), message=f"syncing {entry.name}",
+        )
+        try:
+            run_input = resolve_actor_input(entry)
+            dataset = run_actor(entry.actor_id, run_input, token, timeout) or []
+            if entry.is_linkedin:
+                mapped = [
+                    map_linkedin_record(rec)
+                    for rec in dataset
+                    if isinstance(rec, dict)
+                ]
+                linkedin_posts.extend(mapped)
+                count = len(mapped)
+            else:
+                mapped_items = map_dataset_items(dataset, entry.source_entry())
+                source_items.extend(mapped_items)
+                count = len(mapped_items)
+        except Exception as exc:  # defensive: one actor must never crash sync
+            logger.warning("Actor[%s] raised during live sync: %s", entry.source_key, exc)
+            store.upsert_job(
+                entry.source_key, job_name, "error",
+                finished_at=_now_iso(), message=f"error: {exc}",
+            )
+            continue
+
+        ran_actors.append(entry.source_key)
+        if count == 0:
+            store.upsert_job(
+                entry.source_key, job_name, "success",
+                finished_at=_now_iso(), last_sync_at=_now_iso(),
+                item_count=0, fetched_count=0, produced_deal_count=0,
+                message="fetched 0 items",
+            )
+        else:
+            store.upsert_job(
+                entry.source_key, job_name, "success",
+                finished_at=_now_iso(), last_sync_at=_now_iso(),
+                item_count=count, fetched_count=count,
+                message=f"success: {count} items",
+            )
+
+    synced_at = _now_iso()
+    produced_total = 0
+    try:
+        output = process_batch(source_items)
+        produced_total = len(output.deals)
+        li_dicts = [p.model_dump() for p in linkedin_posts]
+        store.save_snapshot(
+            output,
+            kind=store.SNAPSHOT_KIND_LIVE,
+            synced_at=synced_at,
+            linkedin_posts=li_dicts,
+        )
+        # Attribute produced deals back to each actor by display name.
+        counts: dict[str, int] = {}
+        for deal in output.deals:
+            counts[deal.source_name] = counts.get(deal.source_name, 0) + 1
+        from .actors import ACTOR_REGISTRY as _REG
+        by_key = {e.source_key: e for e in _REG}
+        for key in ran_actors:
+            entry = by_key.get(key)
+            if entry is None or entry.is_linkedin:
+                continue
+            store.upsert_job(
+                key, f"sync:{key}", "success",
+                produced_deal_count=counts.get(entry.name, 0),
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("process_batch failed during live sync: %s", exc)
+
+    return {
+        "processed": True,
+        "item_count": len(source_items),
+        "produced_deal_count": produced_total,
+        "linkedin_post_count": len(linkedin_posts),
+        "actors": ran_actors,
+    }
+
+
 def start_scheduler() -> bool:
     """Start the background scheduler if enabled. Returns whether it started."""
 
@@ -213,7 +356,7 @@ def start_scheduler() -> bool:
     _scheduler = BackgroundScheduler(daemon=True)
     for hour, minute in parse_sync_times():
         _scheduler.add_job(
-            run_sync,
+            run_live_sync,
             CronTrigger(hour=hour, minute=minute),
             id=f"daily-sync-{hour:02d}{minute:02d}",
             replace_existing=True,

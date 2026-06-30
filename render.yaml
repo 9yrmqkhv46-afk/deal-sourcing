@@ -19,7 +19,17 @@ services:
         value: ./data/deal_sourcing.db
       # Credential-gated connectors (leave unset to keep live ingestion idle).
       # Set real values in the Render dashboard's Environment tab.
+      #
+      # A SINGLE APIFY_TOKEN drives the entire 22-actor Apify ACTOR_REGISTRY
+      # (app/actors.py): the daily scheduler and POST /api/sync run every actor
+      # via run-sync-get-dataset-items and store a live_sync snapshot that the
+      # live endpoints serve. Per-actor input payloads can be overridden with
+      # APIFY_ACTOR_INPUT_<SOURCE_KEY> (a JSON object). These are third-party
+      # Apify actors run under the operator's own Apify account/usage.
       - key: APIFY_TOKEN
+        sync: false
+      # Optional per-actor run timeout (seconds) for run-sync-get-dataset-items.
+      - key: APIFY_ACTOR_TIMEOUT
         sync: false
       # Shared DEFAULT actor: a single uploaded Apify actor that drives ANY
       # source lacking its own dedicated APIFY_ACTOR_<SOURCE> below. Set either

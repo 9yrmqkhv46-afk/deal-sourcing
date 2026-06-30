@@ -8,6 +8,9 @@
 const state = {
   data: null,
   sources: null,
+  actors: null,
+  snapshotKind: null,
+  linkedinPosts: [],
   lastBatch: null,
   tab: "deals",
   sort: { key: "overall_score", dir: "desc" },
@@ -174,14 +177,39 @@ async function refreshNow() {
       contacts: body.contacts || [],
       summary: body.summary || {},
     };
+    state.snapshotKind = body.snapshot_kind || null;
+    state.linkedinPosts = body.linkedin_posts || [];
     buildFilterOptions();
     render();
     renderStatus({ last_synced_at: body.last_synced_at, jobs: body.jobs });
-    toast("Refreshed — " + state.data.deals.length + " deals from latest snapshot", "ok");
+    renderDataBanner(body.last_synced_at);
+    const kindLabel = state.snapshotKind === "live_sync" ? "live" : "sample";
+    toast("Refreshed — " + state.data.deals.length + " deals (" + kindLabel + " data)", "ok");
   } catch (err) {
     toast("Refresh failed: " + err.message, "error");
   } finally {
     hideLoading();
+  }
+}
+
+/* Banner telling the user whether they're viewing live or sample data. */
+function renderDataBanner(lastSyncedAt) {
+  const banner = $("#data-banner");
+  const text = $("#data-banner-text");
+  const syncBtn = $("#data-banner-sync");
+  if (!banner) return;
+  if (state.snapshotKind === "live_sync") {
+    banner.className = "data-banner is-live";
+    text.textContent = "Live data • last synced " + fmtSyncTime(lastSyncedAt);
+    if (syncBtn) syncBtn.hidden = true;
+    banner.hidden = false;
+  } else if (state.snapshotKind === "sample_seed") {
+    banner.className = "data-banner is-sample";
+    text.textContent = "Showing sample data — click Sync now to pull live deals from your Apify actors.";
+    if (syncBtn) syncBtn.hidden = false;
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
   }
 }
 
@@ -232,6 +260,32 @@ function render() {
   renderCompanies();
   renderFounders();
   renderContacts();
+  renderLinkedIn();
+}
+
+function renderLinkedIn() {
+  const posts = state.linkedinPosts || [];
+  const empty = $("#linkedin-empty");
+  const grid = $("#linkedin-grid");
+  if (!grid) return;
+  if (empty) empty.hidden = posts.length > 0;
+  grid.innerHTML = posts
+    .map((p) => {
+      const author = escapeHtml(p.author_name || "Unknown author");
+      const when = p.created_at ? `<span class="cell-sub">${escapeHtml(p.created_at)}</span>` : "";
+      const text = escapeHtml(p.text || "—");
+      const links = [
+        p.url ? originalSiteLink(p.url, "View post") : "",
+        p.author_linkedin_url ? `<a class="link" href="${escapeHtml(p.author_linkedin_url)}" target="_blank" rel="noopener">Author profile</a>` : "",
+      ].filter(Boolean).join("");
+      return `<div class="ecard">
+        <div class="ecard-top"><span class="ecard-name">${author}</span></div>
+        <div class="ecard-meta">${when}</div>
+        <div class="li-text">${text}</div>
+        ${links ? `<div class="ecard-links">${links}</div>` : ""}
+      </div>`;
+    })
+    .join("");
 }
 
 function renderDonut(s) {
@@ -474,12 +528,12 @@ function renderContacts() {
 
 async function loadSources() {
   try {
-    const res = await fetch("/api/sources");
+    const res = await fetch("/api/actors");
     if (!res.ok) throw new Error("HTTP " + res.status);
-    state.sources = await res.json();
-    renderSources();
+    state.actors = await res.json();
+    renderActors();
   } catch (_err) {
-    /* sources panel is best-effort; ignore transient errors */
+    /* actors panel is best-effort; ignore transient errors */
   }
 }
 
@@ -487,46 +541,70 @@ function sourceTypeLabel(t) {
   return titleCase(t);
 }
 
-function renderSources() {
-  const payload = state.sources;
-  if (!payload) return;
-  const sources = payload.sources || [];
-  const grid = $("#sources-grid");
-  const needKey = sources.filter((s) => !s.configured).length;
+function actorStatusBadge(a) {
+  const status = (a.status || (a.configured ? "idle" : "")).toLowerCase();
+  if (!a.configured) return `<span class="src-badge src-need">Needs APIFY_TOKEN 🔑</span>`;
+  if (status === "success") {
+    return `<span class="src-badge src-ok">Configured ✅</span>`;
+  }
+  if (status === "running") return `<span class="src-badge job-running">Running…</span>`;
+  if (status === "error") return `<span class="src-badge src-need">Error</span>`;
+  if (status === "skipped") return `<span class="src-badge src-need">Skipped</span>`;
+  return `<span class="src-badge src-ok">Configured ✅</span>`;
+}
 
-  // Info banner explaining why no live deals appear when keys are missing.
+function renderActors() {
+  const payload = state.actors;
+  if (!payload) return;
+  const actors = payload.actors || [];
+  const categories = payload.categories || [];
+  const container = $("#actors-grouped");
+  if (!container) return;
+
+  // Banner: explain APIFY_TOKEN requirement when absent.
   const banner = $("#sources-banner");
-  if (needKey > 0) {
-    const tokenMsg = payload.apify_token_present
-      ? `${needKey} source${needKey === 1 ? "" : "s"} still need a per-source actor id set in Render to pull live listings.`
-      : "Add an Apify API key (APIFY_TOKEN) in Render to pull live listings from these sources. Until then the dashboard shows seeded sample data.";
-    $("#sources-banner-text").textContent = tokenMsg;
-    banner.hidden = false;
-  } else {
-    banner.hidden = true;
+  if (banner) {
+    if (!payload.apify_token_present) {
+      $("#sources-banner-text").textContent =
+        "Add an Apify API key (APIFY_TOKEN) in Render to drive all 22 actors. Until then the dashboard shows seeded sample data.";
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
   }
 
-  $("#sources-empty").hidden = sources.length > 0;
-  grid.innerHTML = sources
-    .map((s) => {
-      const configured = !!s.configured;
-      const badge = configured
-        ? `<span class="src-badge src-ok">Configured ✅</span>`
-        : `<span class="src-badge src-need">Needs API key 🔑</span>`;
-      const envRow = configured
-        ? ""
-        : `<div class="src-env">Set <code>${escapeHtml(s.actor_env_var)}</code></div>`;
-      const reqTag = `<span class="src-req">${escapeHtml(sourceTypeLabel(s.source_type))} · ${escapeHtml(s.requires)}</span>`;
-      const site = originalSiteLink(s.base_url, "View site");
-      return `<div class="ecard src-card ${configured ? "is-ok" : "is-need"}">
-        <div class="ecard-top">
-          <span class="ecard-name">${escapeHtml(s.name)}</span>
-          ${badge}
-        </div>
-        <div class="ecard-meta">${reqTag}</div>
-        ${envRow}
-        <div class="src-note">${escapeHtml(s.note)}</div>
-        ${site ? `<div class="ecard-links">${site}</div>` : ""}
+  $("#sources-empty").hidden = actors.length > 0;
+
+  const byCat = {};
+  actors.forEach((a) => {
+    (byCat[a.category] = byCat[a.category] || []).push(a);
+  });
+  const order = categories.length ? categories : Object.keys(byCat);
+
+  container.innerHTML = order
+    .map((cat) => {
+      const list = byCat[cat] || [];
+      if (!list.length) return "";
+      const cards = list
+        .map((a) => {
+          const badge = actorStatusBadge(a);
+          const count = a.item_count ? ` · ${a.item_count} items` : "";
+          const msg = a.message ? `<div class="src-note">${escapeHtml(a.message)}</div>` : "";
+          const liTag = a.is_linkedin ? `<span class="badge badge-franchise">LinkedIn</span>` : "";
+          return `<div class="ecard src-card ${a.configured ? "is-ok" : "is-need"}">
+            <div class="ecard-top">
+              <span class="ecard-name">${escapeHtml(a.name)}</span>
+              ${badge}
+            </div>
+            <div class="ecard-meta"><span class="src-req">${escapeHtml(sourceTypeLabel(a.source_type))}</span> ${liTag}</div>
+            <div class="src-env"><code>${escapeHtml(a.actor_id)}</code>${escapeHtml(count)}</div>
+            ${msg}
+          </div>`;
+        })
+        .join("");
+      return `<div class="actor-cat">
+        <h3 class="actor-cat-title">${escapeHtml(cat)} <span class="muted">(${list.length})</span></h3>
+        <div class="card-grid">${cards}</div>
       </div>`;
     })
     .join("");
@@ -545,14 +623,21 @@ async function syncNow() {
     renderStatus({ last_synced_at: body.last_synced_at, jobs: body.jobs });
     toast("Sync started — watching per-source results…", "ok");
 
-    // Poll status a handful of times so per-source results surface promptly.
+    // Poll status a handful of times so per-actor results surface promptly.
     let ticks = 0;
     clearInterval(syncPollTimer);
     syncPollTimer = setInterval(async () => {
       ticks += 1;
       await pollStatus();
       await loadSources();
-      if (ticks >= 8) clearInterval(syncPollTimer);
+      // When no actor is still running (or we've polled enough), stop and
+      // auto-refresh so the dashboard flips to live deals.
+      const jobs = (state.actors && state.actors.actors) || [];
+      const running = jobs.some((a) => (a.status || "").toLowerCase() === "running");
+      if (!running || ticks >= 12) {
+        clearInterval(syncPollTimer);
+        await refreshNow();
+      }
     }, 1500);
   } catch (err) {
     toast("Sync failed: " + err.message, "error");
@@ -752,6 +837,8 @@ function switchTab(name) {
 function bindEvents() {
   $("#refresh-now").addEventListener("click", refreshNow);
   $("#sync-now").addEventListener("click", syncNow);
+  const bannerSync = $("#data-banner-sync");
+  if (bannerSync) bannerSync.addEventListener("click", syncNow);
   $("#load-sample").addEventListener("click", loadSample);
   $("#open-process").addEventListener("click", openModal);
   $("#export-json").addEventListener("click", exportJson);

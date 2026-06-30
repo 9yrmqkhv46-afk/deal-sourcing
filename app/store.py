@@ -65,6 +65,20 @@ def init_db() -> None:
             )
             """
         )
+        # Backward-compatible snapshot columns (added via ALTER so existing
+        # databases pick them up without a destructive migration):
+        #   kind          -> "sample_seed" | "live_sync"
+        #   synced_at     -> ISO timestamp of the live sync that produced it
+        #   linkedin_posts-> JSON list of LinkedInPost dicts attached to the snapshot
+        for column_def in (
+            "kind TEXT",
+            "synced_at TEXT",
+            "linkedin_posts TEXT",
+        ):
+            try:
+                conn.execute(f"ALTER TABLE snapshots ADD COLUMN {column_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sync_jobs (
@@ -92,20 +106,52 @@ def init_db() -> None:
         conn.commit()
 
 
-def save_snapshot(output: ProcessOutput) -> None:
-    """Persist ``output`` as the latest snapshot (JSON)."""
+#: Valid snapshot kinds. A sample seed is the bundled demo data; a live sync is
+#: produced by running the Apify actor registry.
+SNAPSHOT_KIND_SAMPLE = "sample_seed"
+SNAPSHOT_KIND_LIVE = "live_sync"
+_VALID_SNAPSHOT_KINDS = {SNAPSHOT_KIND_SAMPLE, SNAPSHOT_KIND_LIVE}
+
+
+def save_snapshot(
+    output: ProcessOutput,
+    *,
+    kind: str = SNAPSHOT_KIND_SAMPLE,
+    synced_at: Optional[str] = None,
+    linkedin_posts: Optional[list[dict[str, Any]]] = None,
+) -> None:
+    """Persist ``output`` as the latest snapshot (JSON).
+
+    ``kind`` records whether this is the bundled ``sample_seed`` or a
+    ``live_sync`` produced by the Apify actor registry. ``synced_at`` is the
+    live-sync timestamp (``None`` for the seed). ``linkedin_posts`` is an
+    optional list of LinkedInPost dicts attached to a live sync; it is stored
+    alongside the strict output (never inside it, so the strict contract is
+    untouched).
+    """
+
+    if kind not in _VALID_SNAPSHOT_KINDS:
+        raise ValueError(f"invalid snapshot kind: {kind!r}")
 
     payload = json.dumps(output.model_dump(mode="json"), separators=(",", ":"))
+    li = json.dumps(linkedin_posts or [], separators=(",", ":"))
     with _LOCK, _connect() as conn:
         conn.execute(
-            "INSERT INTO snapshots (created_at, payload) VALUES (?, ?)",
-            (_now_iso(), payload),
+            "INSERT INTO snapshots (created_at, payload, kind, synced_at, linkedin_posts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (_now_iso(), payload, kind, synced_at, li),
         )
         conn.commit()
 
 
 def load_latest_snapshot() -> Optional[dict[str, Any]]:
-    """Return the most recently saved snapshot as a dict, or ``None``."""
+    """Return the most recently saved snapshot payload as a dict, or ``None``.
+
+    The returned dict contains EXACTLY the strict output keys (deals,
+    companies, founders, contacts, summary) - no metadata is mixed in, so the
+    strict contract is preserved. Use :func:`load_latest_snapshot_record` for
+    metadata (kind / synced_at / linkedin_posts).
+    """
 
     with _LOCK, _connect() as conn:
         row = conn.execute(
@@ -117,6 +163,64 @@ def load_latest_snapshot() -> Optional[dict[str, Any]]:
         return json.loads(row["payload"])
     except (ValueError, TypeError):
         return None
+
+
+def _row_to_record(row: sqlite3.Row) -> Optional[dict[str, Any]]:
+    """Build a rich snapshot record dict from a DB row (payload + metadata)."""
+
+    try:
+        payload = json.loads(row["payload"])
+    except (ValueError, TypeError):
+        return None
+    try:
+        linkedin_posts = json.loads(row["linkedin_posts"]) if row["linkedin_posts"] else []
+    except (ValueError, TypeError):
+        linkedin_posts = []
+    if not isinstance(linkedin_posts, list):
+        linkedin_posts = []
+    record = dict(payload)
+    record["kind"] = row["kind"] or SNAPSHOT_KIND_SAMPLE
+    record["synced_at"] = row["synced_at"]
+    record["linkedin_posts"] = linkedin_posts
+    return record
+
+
+def load_latest_snapshot_record() -> Optional[dict[str, Any]]:
+    """Return the latest snapshot's payload PLUS metadata, or ``None``.
+
+    Shape: the strict output keys plus ``kind`` (``sample_seed`` /
+    ``live_sync``), ``synced_at`` and ``linkedin_posts``.
+    """
+
+    try:
+        with _LOCK, _connect() as conn:
+            row = conn.execute(
+                "SELECT payload, kind, synced_at, linkedin_posts "
+                "FROM snapshots ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None  # table not created yet
+    return _row_to_record(row) if row else None
+
+
+def load_latest_live_snapshot() -> Optional[dict[str, Any]]:
+    """Return the latest ``live_sync`` snapshot record, or ``None``.
+
+    Same shape as :func:`load_latest_snapshot_record` but restricted to
+    snapshots produced by a live sync of the Apify actor registry. The live
+    GET endpoints read from this so they NEVER serve seeded sample data.
+    """
+
+    try:
+        with _LOCK, _connect() as conn:
+            row = conn.execute(
+                "SELECT payload, kind, synced_at, linkedin_posts FROM snapshots "
+                "WHERE kind = ? ORDER BY id DESC LIMIT 1",
+                (SNAPSHOT_KIND_LIVE,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None  # table not created yet
+    return _row_to_record(row) if row else None
 
 
 def has_snapshot() -> bool:

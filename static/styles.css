@@ -435,3 +435,57 @@ tbody tr:last-child td { border-bottom: none; }
   .result-count { margin-left: 0; width: 100%; }
   .d-grid { grid-template-columns: 1fr; }
 }
+
+
+/* ===================== Live/sample data banner ===================== */
+.data-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.data-banner .ic { width: 18px; height: 18px; flex: none; }
+.data-banner.is-sample {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fed7aa;
+}
+.data-banner.is-live {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+.data-banner #data-banner-sync { margin-left: auto; }
+.btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+
+/* ===================== LinkedIn posts ===================== */
+.li-text {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  color: #1f2937;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+/* ===================== Actor registry grouping ===================== */
+.actor-cat { margin-bottom: 22px; }
+.actor-cat-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: #0f2742;
+  border-bottom: 1px solid #e5eaf1;
+  padding-bottom: 6px;
+}
+.actor-cat-title .muted { font-weight: 400; color: #6b7280; }
+.src-badge.job-running {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.src-env code {
+  font-size: 0.78rem;
+  word-break: break-all;
+}

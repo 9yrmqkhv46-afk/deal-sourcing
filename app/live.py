@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from . import store
 from .connectors import get_connector
 from .connectors.base import Connector
 from .connectors.linkedin_connector import LinkedInConnector
@@ -289,19 +290,72 @@ def _empty_deal_summary() -> dict[str, Any]:
 # --- Live deal fetch + shaping ----------------------------------------------
 
 
+_NO_LIVE_SNAPSHOT_NOTE = (
+    "No live data yet — add APIFY_TOKEN and run POST /api/sync (or click Sync now)."
+)
+
+
+def _live_snapshot() -> Optional[dict[str, Any]]:
+    """Return the latest live-sync snapshot record (test seam)."""
+
+    return store.load_latest_live_snapshot()
+
+
+def _shape_deals_from_snapshot(
+    group: str, snapshot: dict[str, Any], limit: Optional[int], country: Optional[str]
+) -> dict[str, Any]:
+    """Shape live deals for a ``group`` from a stored live-sync snapshot.
+
+    Deals/companies are rebuilt from the snapshot's strict payload and filtered
+    by group: ``broker`` -> marketplace/broker_directory; ``franchise`` ->
+    ``is_franchise``; ``insolvency`` -> ``insolvency_platform``. NEVER returns
+    sample data.
+    """
+
+    companies = [Company(**c) for c in snapshot.get("companies", []) or []]
+    companies_by_id = {c.company_id: c for c in companies}
+    deals = [Deal(**d) for d in snapshot.get("deals", []) or []]
+
+    if group == "broker":
+        deals = [d for d in deals if d.source_type in _BROKER_TYPES]
+    elif group == "franchise":
+        deals = [d for d in deals if d.is_franchise]
+    elif group == "insolvency":
+        deals = [d for d in deals if d.source_type is SourceType.insolvency_platform]
+    else:
+        deals = []
+
+    deals = [d for d in deals if _matches_country(d, companies_by_id, country)]
+    projected = [project_deal(d, companies_by_id) for d in deals]
+    if limit is not None and limit >= 0:
+        projected = projected[:limit]
+
+    note = None if projected else _empty_returned_note(group)
+    return {"deals": projected, "summary": _deal_summary(projected), "note": note}
+
+
 def fetch_live_deals(group: str, limit: Optional[int], country: Optional[str]) -> dict[str, Any]:
     """Fetch live deals for a source ``group`` and shape the response.
 
-    Returns ``{deals, summary, note}``. When no source in the group is
-    configured (or all configured sources return nothing) ``deals`` is empty and
-    ``note`` explains why — NO sample fallback.
+    Reads from the latest LIVE-sync snapshot when one exists (the data the
+    scheduler / ``POST /api/sync`` produced from the Apify actor registry). When
+    no live snapshot exists yet it falls back to fetching directly from any
+    configured live connector. In NO case is seeded sample data returned: with
+    neither a live snapshot nor a configured source, ``deals`` is empty and
+    ``note`` explains why.
     """
+
+    snapshot = _live_snapshot()
+    if snapshot is not None:
+        result = _shape_deals_from_snapshot(group, snapshot, limit, country)
+        return result
 
     keys = _group_source_keys(group)
     configured = [k for k in keys if _safe_is_configured(k)]
 
     if not configured:
-        return {"deals": [], "summary": _empty_deal_summary(), "note": _NO_SOURCE_NOTE.get(group, "")}
+        note = _NO_SOURCE_NOTE.get(group, "") or _NO_LIVE_SNAPSHOT_NOTE
+        return {"deals": [], "summary": _empty_deal_summary(), "note": note}
 
     items: list[SourceItem] = []
     for key in configured:
@@ -363,12 +417,28 @@ def insolvency_opportunities(country: str = "Australia") -> dict[str, Any]:
 
 
 def linkedin_posts(country: str = "Australia", since_days: int = 1) -> dict[str, Any]:
-    """Live LinkedIn posts via the credential-gated connector.
+    """Live LinkedIn posts.
 
-    Returns ``{linkedin_posts, summary{top_linkedin_posts}, note}``. When the
-    connector is not configured, ``linkedin_posts`` is empty and ``note``
-    explains the authorized-source / ToS requirement.
+    Prefers the LinkedIn posts attached to the latest LIVE-sync snapshot (what
+    the Apify LinkedIn actors produced). When no live snapshot exists, falls
+    back to the credential-gated connector. Never returns sample data: with no
+    live snapshot and no configured connector, ``linkedin_posts`` is empty and
+    ``note`` explains why.
+
+    Returns ``{linkedin_posts, summary{top_linkedin_posts}, note}``.
     """
+
+    snapshot = _live_snapshot()
+    if snapshot is not None:
+        posts = [p for p in (snapshot.get("linkedin_posts") or []) if isinstance(p, dict)]
+        if not posts:
+            return {
+                "linkedin_posts": [],
+                "summary": {"top_linkedin_posts": []},
+                "note": "Live sync ran but no LinkedIn posts were returned.",
+            }
+        top = [p["id"] for p in posts if p.get("id")][:MAX_TOP_POSTS]
+        return {"linkedin_posts": posts, "summary": {"top_linkedin_posts": top}, "note": None}
 
     conn = _linkedin_connector()
     if not _safe_connector_configured(conn):

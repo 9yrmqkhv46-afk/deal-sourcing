@@ -146,6 +146,57 @@ resolvable (`resolved_actor_id_present`, value never leaked) and the exact
 sync; unconfigured sources are reported as `skipped: no API key` (or
 `skipped: no actor` when a token is set but no actor is resolvable).
 
+### Apify actor registry (22 actors) — live sync
+
+In addition to the per-source connectors above, the agent ships a fixed
+**Apify ACTOR_REGISTRY of 22 actors** (`app/actors.py`). **One `APIFY_TOKEN`
+drives all of them** — there are no per-actor tokens. Each actor is run via
+Apify's `run-sync-get-dataset-items` endpoint; non-LinkedIn actors map into the
+deterministic pipeline as `SourceItem`s, and the four LinkedIn actors map into
+`LinkedInPost`s. The actors, grouped by category, map to source types as:
+
+| Category | Actors | `source_type` |
+|----------|:------:|---------------|
+| AU/Global Business For Sale | 5 | `marketplace` |
+| BizBuySell | 4 | `marketplace` |
+| AU Directories | 3 | `broker_directory` (ASIC → `chamber_directory`) |
+| LinkedIn posts | 4 | `social` (`is_linkedin=true`) |
+| M&A intelligence | 3 | `news` |
+| News | 3 | `news` |
+
+**Live-sync-then-refresh flow:**
+
+1. The daily scheduler (or **`POST /api/sync`**, which returns `202` immediately
+   and runs in the background — it never blocks on the 22 slow actors) iterates
+   the registry. Per-actor status is recorded (`success: N items` /
+   `fetched 0 items` / `error: <msg>`), and a single failing actor never crashes
+   the sync.
+2. All collected source items run through `process_batch` **once**; the
+   resulting snapshot is stored with `kind="live_sync"` and a `synced_at`
+   timestamp, and the LinkedIn posts are attached to it.
+3. The dashboard polls `/api/status`, then auto-calls `/api/refresh` to flip
+   from sample to **live** data. `/api/refresh` exposes `snapshot_kind`
+   (`sample_seed` / `live_sync`) plus `linkedin_posts` so the UI shows a banner:
+   *"Showing sample data…"* vs *"Live data • last synced HH:MM"*.
+
+**Live endpoints never return sample data.** `/api/brokers/deals`,
+`/api/franchises/deals`, `/api/insolvency/opportunities`, `/api/linkedin/posts`
+and `/api/live/today` read from the latest **live** snapshot only. Until a live
+sync has run they return empty lists plus a `note` — they never fall back to the
+seeded sample (only `/api/refresh` does that).
+
+**Per-actor input override.** Each actor has a sensible default input payload.
+To retune one without a code change, set `APIFY_ACTOR_INPUT_<SOURCE_KEY>` to a
+JSON object in Render's Environment tab (e.g.
+`APIFY_ACTOR_INPUT_AUSTRALIA_BUSINESS_FOR_SALE={"maxItems":50,"location":"Australia"}`);
+a malformed value is ignored and the default is used.
+
+> These are **third-party Apify actors** run under the **operator's own Apify
+> account and usage** (and billed to it). Review each actor's terms before
+> enabling. `GET /api/actors` lists all 22 with their category, source type,
+> `is_linkedin` flag, configured state (driven by `APIFY_TOKEN`) and last-run
+> message.
+
 ### Compliance note — LinkedIn & Facebook (IMPORTANT)
 
 The LinkedIn and Facebook connectors ship as **generic, credential-gated
@@ -180,6 +231,7 @@ Then open <http://localhost:8000> and click **Load sample data**.
 - `POST /api/process` — body `{ "batch": [ ...source items... ], "config": { ...overrides? } }` → strict JSON output
 - `GET  /api/sample` — bundled demo batch
 - `GET  /api/sources` — `{ apify_token_present, sources: [ { key, name, source_type, base_url, configured, actor_env_var, actor_source, resolved_actor_id_present, requires, note } ] }`
+- `GET  /api/actors` — the 22-actor Apify registry: `{ apify_token_present, categories: [...], actors: [ { name, actor_id, source_key, source_type, category, is_linkedin, configured, message, status, item_count } ] }`
 - `POST /api/refresh` — re-query the latest DB snapshot (NOT a scrape) → strict keys + `last_synced_at` + `jobs`
 - `GET  /api/status` — `{ last_synced_at, jobs: [...] }` per-source sync status
 - `POST /api/sync` — manually trigger a background sync (credential-gated sources still no-op safely)

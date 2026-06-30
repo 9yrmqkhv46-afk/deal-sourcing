@@ -61,6 +61,13 @@
   </div>
 
   <main id="main">
+    <!-- ===================== Live/sample data banner ===================== -->
+    <div id="data-banner" class="data-banner" hidden role="status" aria-live="polite">
+      <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M10 9v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6.4" r="1" fill="currentColor"/></svg>
+      <span id="data-banner-text"></span>
+      <button id="data-banner-sync" class="btn btn-primary btn-sm" type="button">Sync now</button>
+    </div>
+
     <!-- ===================== KPI summary ===================== -->
     <section id="kpi-row" class="kpi-row" hidden aria-label="Summary metrics">
       <div class="kpi kpi-core">
@@ -114,6 +121,7 @@
       <button class="tab" role="tab" aria-selected="false" data-tab="companies" id="tab-companies">Companies</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="founders" id="tab-founders">Founders</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="contacts" id="tab-contacts">Top Contacts</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="linkedin" id="tab-linkedin">LinkedIn Posts</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="sources" id="tab-sources">Data Sources</button>
     </nav>
 
@@ -188,16 +196,23 @@
       <div id="contacts-empty" class="empty-state" hidden>No outreach contacts.</div>
     </section>
 
+    <!-- ===================== LinkedIn Posts view ===================== -->
+    <section id="view-linkedin" class="view" role="tabpanel" aria-labelledby="tab-linkedin" hidden>
+      <p class="view-intro">Live LinkedIn posts surfaced by the credential-gated LinkedIn actors during the last sync. Posts appear here only after a live sync returns them.</p>
+      <div id="linkedin-grid" class="card-grid"></div>
+      <div id="linkedin-empty" class="empty-state" hidden>No LinkedIn posts yet — run a live sync with the LinkedIn actors configured.</div>
+    </section>
+
     <!-- ===================== Data Sources view ===================== -->
     <section id="view-sources" class="view" role="tabpanel" aria-labelledby="tab-sources" hidden>
       <div id="sources-banner" class="info-banner" hidden>
         <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M10 9v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6.4" r="1" fill="currentColor"/></svg>
         <span id="sources-banner-text">Add an Apify API key in Render to pull live listings from these sources.</span>
       </div>
-      <p class="view-intro">Every registered live source. Sources marked <b>Needs API key</b> won't return live deals until their Apify token and actor id are set in Render's Environment tab — until then the dashboard shows seeded sample data.</p>
-      <p class="view-intro"><b>Live API:</b> five read-only endpoints expose live connector data (no sample fallback): <code>GET /api/brokers/deals</code>, <code>GET /api/franchises/deals</code>, <code>GET /api/insolvency/opportunities</code>, <code>GET /api/linkedin/posts</code>, <code>GET /api/live/today</code>. They return empty results plus a <code>note</code> until live sources are configured.</p>
-      <div id="sources-grid" class="card-grid"></div>
-      <div id="sources-empty" class="empty-state" hidden>No sources registered.</div>
+      <p class="view-intro"><b>Apify actor registry — 22 actors.</b> One <code>APIFY_TOKEN</code> drives all of them. Each actor runs via Apify's <code>run-sync-get-dataset-items</code> endpoint and its results flow through the deterministic pipeline. Per-actor inputs can be overridden with <code>APIFY_ACTOR_INPUT_&lt;KEY&gt;</code>. These are third-party Apify actors run under the operator's own Apify account/usage.</p>
+      <p class="view-intro"><b>Live API:</b> five read-only endpoints expose live snapshot data (no sample fallback): <code>GET /api/brokers/deals</code>, <code>GET /api/franchises/deals</code>, <code>GET /api/insolvency/opportunities</code>, <code>GET /api/linkedin/posts</code>, <code>GET /api/live/today</code>. They return empty results plus a <code>note</code> until a live sync has run.</p>
+      <div id="actors-grouped"></div>
+      <div id="sources-empty" class="empty-state" hidden>No actors registered.</div>
     </section>
   </main>
 

@@ -38,8 +38,9 @@ from .ingestion import BatchValidationError
 from .models import ProcessRequest
 from .pipeline import process_batch
 from .sample_data import sample_batch
-from .scheduler import run_sync, shutdown_scheduler, start_scheduler
+from .scheduler import run_live_sync, run_sync, shutdown_scheduler, start_scheduler
 from .sources import apify_token_present, source_config_status
+from .actors import ACTOR_REGISTRY, CATEGORY_ORDER
 
 logger = logging.getLogger("app.main")
 
@@ -137,6 +138,53 @@ def sources() -> JSONResponse:
     )
 
 
+@app.get("/api/actors")
+def actors() -> JSONResponse:
+    """Return the 22-actor Apify registry grouped for the Data Sources panel.
+
+    Shape::
+
+        {
+          "apify_token_present": bool,
+          "categories": [ ...ordered category labels... ],
+          "actors": [ { name, actor_id, source_key, source_type, category,
+                        is_linkedin, configured, message }, ... ]
+        }
+
+    ``configured`` is simply whether ``APIFY_TOKEN`` is present (one token
+    drives every actor). ``message`` is the actor's last sync-job message, if
+    any. Actor input payloads are never leaked.
+    """
+
+    token_present = apify_token_present()
+    store.init_db()
+    jobs = {j["source_key"]: j for j in store.get_job_statuses()}
+    actors_out = []
+    for entry in ACTOR_REGISTRY:
+        job = jobs.get(entry.source_key) or {}
+        actors_out.append(
+            {
+                "name": entry.name,
+                "actor_id": entry.actor_id,
+                "source_key": entry.source_key,
+                "source_type": entry.source_type.value,
+                "category": entry.category,
+                "is_linkedin": entry.is_linkedin,
+                "configured": token_present,
+                "message": job.get("message"),
+                "status": job.get("status"),
+                "item_count": job.get("item_count"),
+            }
+        )
+    return JSONResponse(
+        content={
+            "apify_token_present": token_present,
+            "categories": list(CATEGORY_ORDER),
+            "actors": actors_out,
+        }
+    )
+
+
 @app.post("/api/process")
 def process(request: ProcessRequest) -> JSONResponse:
     """Run the pipeline and return the strict JSON output contract."""
@@ -159,16 +207,27 @@ def process(request: ProcessRequest) -> JSONResponse:
 def refresh() -> JSONResponse:
     """Re-query the DB for the latest snapshot (NOT a re-scrape).
 
-    Returns the strict output keys plus ``last_synced_at`` and ``jobs``. If the
-    DB is empty it is seeded from the bundled sample batch first.
+    Returns the strict output keys plus ``last_synced_at``, ``jobs``,
+    ``snapshot_kind`` (``sample_seed`` / ``live_sync`` so the UI can tell the
+    user whether they are viewing live or sample data) and ``linkedin_posts``
+    when a live sync attached any. If the DB is empty it is seeded from the
+    bundled sample batch first.
     """
 
     store.init_db()
-    snapshot = store.load_latest_snapshot()
-    if snapshot is None:
-        snapshot = seed_if_empty()
+    record = store.load_latest_snapshot_record()
+    if record is None:
+        seed_if_empty()
+        record = store.load_latest_snapshot_record()
 
-    body = dict(snapshot)
+    record = record or {}
+    linkedin_posts = record.pop("linkedin_posts", []) if isinstance(record, dict) else []
+    snapshot_kind = record.pop("kind", store.SNAPSHOT_KIND_SAMPLE)
+    record.pop("synced_at", None)
+
+    body = dict(record)
+    body["snapshot_kind"] = snapshot_kind
+    body["linkedin_posts"] = linkedin_posts
     body["last_synced_at"] = store.get_overall_last_sync()
     body["jobs"] = store.get_job_statuses()
     return JSONResponse(content=body)
@@ -196,7 +255,7 @@ def sync(background_tasks: BackgroundTasks) -> JSONResponse:
     """
 
     store.init_db()
-    background_tasks.add_task(run_sync)
+    background_tasks.add_task(run_live_sync)
     return JSONResponse(
         status_code=202,
         content={
