@@ -226,7 +226,7 @@ def run_live_sync() -> dict:
 
     # Local imports keep module import order simple and avoid any cycle risk.
     from .actors import ACTOR_REGISTRY, resolve_actor_input
-    from .connectors.apify_connector import map_dataset_items, run_actor
+    from .connectors.apify_connector import map_dataset_items, run_actor_result
     from .live import map_linkedin_record
 
     store.init_db()
@@ -246,12 +246,15 @@ def run_live_sync() -> dict:
             "produced_deal_count": 0,
             "linkedin_post_count": 0,
             "actors": [],
+            "error_count": 0,
+            "errors": [],
         }
 
     timeout = _actor_timeout()
     source_items: list[SourceItem] = []
     linkedin_posts: list = []
     ran_actors: list[str] = []
+    error_messages: list[str] = []
 
     for entry in ACTOR_REGISTRY:
         job_name = f"sync:{entry.source_key}"
@@ -261,7 +264,19 @@ def run_live_sync() -> dict:
         )
         try:
             run_input = resolve_actor_input(entry)
-            dataset = run_actor(entry.actor_id, run_input, token, timeout) or []
+            result = run_actor_result(entry.actor_id, run_input, token, timeout)
+            # When the actor run failed, record the REAL Apify error string
+            # (status code + body snippet) and move on - never abort the others.
+            if not result.ok:
+                message = result.error or "unknown error"
+                error_messages.append(f"{entry.source_key}: {message}")
+                store.upsert_job(
+                    entry.source_key, job_name, "error",
+                    finished_at=_now_iso(), message=message,
+                )
+                continue
+
+            dataset = result.items
             if entry.is_linkedin:
                 mapped = [
                     map_linkedin_record(rec)
@@ -276,6 +291,7 @@ def run_live_sync() -> dict:
                 count = len(mapped_items)
         except Exception as exc:  # defensive: one actor must never crash sync
             logger.warning("Actor[%s] raised during live sync: %s", entry.source_key, exc)
+            error_messages.append(f"{entry.source_key}: error: {exc}")
             store.upsert_job(
                 entry.source_key, job_name, "error",
                 finished_at=_now_iso(), message=f"error: {exc}",
@@ -333,6 +349,8 @@ def run_live_sync() -> dict:
         "produced_deal_count": produced_total,
         "linkedin_post_count": len(linkedin_posts),
         "actors": ran_actors,
+        "error_count": len(error_messages),
+        "errors": error_messages[:5],
     }
 
 

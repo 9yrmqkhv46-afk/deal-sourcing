@@ -537,6 +537,51 @@ async function loadSources() {
   }
 }
 
+/* Run the Apify token diagnostics and show the result in an info box. */
+async function runDiagnostics() {
+  const box = $("#diagnostics-box");
+  const btn = $("#run-diagnostics");
+  if (btn) btn.disabled = true;
+  if (box) {
+    box.hidden = false;
+    box.className = "info-banner";
+    box.textContent = "Checking Apify token…";
+  }
+  try {
+    const res = await fetch("/api/diagnostics");
+    const d = await res.json();
+    if (!box) return;
+    const valid = d.token_valid;
+    const lines = [];
+    if (!d.token_present) {
+      lines.push("No APIFY_TOKEN is configured.");
+    } else {
+      lines.push("Token present (" + (d.token_length || 0) + " chars).");
+    }
+    if (valid === true) {
+      lines.push("Token valid ✅" + (d.apify_user ? " — Apify user: " + d.apify_user : ""));
+    } else if (valid === false) {
+      lines.push("Token invalid ❌");
+    } else {
+      lines.push("Token not tested (none present).");
+    }
+    if (d.message) lines.push(d.message);
+    lines.push("Scheduler " + (d.scheduler_enabled ? "enabled" : "disabled") +
+      " · " + (d.actor_count || 0) + " actors" +
+      (d.sync_times && d.sync_times.length ? " · sync at " + d.sync_times.join(", ") : ""));
+
+    box.className = "info-banner " + (valid === true ? "is-ok" : valid === false ? "is-error" : "");
+    box.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+  } catch (err) {
+    if (box) {
+      box.className = "info-banner is-error";
+      box.textContent = "Diagnostics failed: " + err.message;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function sourceTypeLabel(t) {
   return titleCase(t);
 }
@@ -589,9 +634,14 @@ function renderActors() {
         .map((a) => {
           const badge = actorStatusBadge(a);
           const count = a.item_count ? ` · ${a.item_count} items` : "";
-          const msg = a.message ? `<div class="src-note">${escapeHtml(a.message)}</div>` : "";
+          const isError = (a.status || "").toLowerCase() === "error";
+          const rawMsg = a.message || "";
+          const shownMsg = rawMsg.length > 160 ? rawMsg.slice(0, 160) + "…" : rawMsg;
+          const msg = rawMsg
+            ? `<div class="src-note ${isError ? "src-error" : ""}" title="${escapeHtml(rawMsg)}">${isError ? "⚠ " : ""}${escapeHtml(shownMsg)}</div>`
+            : "";
           const liTag = a.is_linkedin ? `<span class="badge badge-franchise">LinkedIn</span>` : "";
-          return `<div class="ecard src-card ${a.configured ? "is-ok" : "is-need"}">
+          return `<div class="ecard src-card ${a.configured ? "is-ok" : "is-need"} ${isError ? "is-error" : ""}">
             <div class="ecard-top">
               <span class="ecard-name">${escapeHtml(a.name)}</span>
               ${badge}
@@ -837,6 +887,8 @@ function switchTab(name) {
 function bindEvents() {
   $("#refresh-now").addEventListener("click", refreshNow);
   $("#sync-now").addEventListener("click", syncNow);
+  const diagBtn = $("#run-diagnostics");
+  if (diagBtn) diagBtn.addEventListener("click", runDiagnostics);
   const bannerSync = $("#data-banner-sync");
   if (bannerSync) bannerSync.addEventListener("click", syncNow);
   $("#load-sample").addEventListener("click", loadSample);

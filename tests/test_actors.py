@@ -114,10 +114,12 @@ def test_exactly_four_linkedin_actors_flagged():
 
 def test_default_inputs_match_spec_examples():
     by_id = {e.actor_id: e for e in ACTOR_REGISTRY}
+    # maxResults lowered to 50 to stay within run-sync limits; minCashFlow unchanged.
     assert by_id["solidcode~businesses-for-sale-scraper"].input == {
-        "country": "Australia", "maxResults": 200, "minCashFlow": 250000,
+        "country": "Australia", "maxResults": 50, "minCashFlow": 250000,
     }
-    assert by_id["scrapesage~bizbuysell-scraper"].input["maxItems"] == 100
+    # maxItems lowered from 100 -> 50 to avoid run-sync 408/413.
+    assert by_id["scrapesage~bizbuysell-scraper"].input["maxItems"] == 50
     assert by_id["harvestapi~linkedin-post-search"].input["postedLimit"] == "past-week"
 
 
@@ -263,6 +265,19 @@ def _fake_dataset(actor_id, run_input, token, timeout=120):
     ]
 
 
+def _fake_result(actor_id, run_input, token, timeout=120):
+    """Wrap :func:`_fake_dataset` in a successful ActorRunResult (no network)."""
+
+    from app.connectors.apify_connector import ActorRunResult
+
+    return ActorRunResult(
+        items=_fake_dataset(actor_id, run_input, token, timeout),
+        ok=True,
+        error=None,
+        status_code=200,
+    )
+
+
 def test_run_live_sync_without_token_skips_all_no_snapshot(live_db, monkeypatch):
     from app import scheduler
 
@@ -283,7 +298,7 @@ def test_run_live_sync_collects_deals_and_linkedin_posts(live_db, monkeypatch):
     from app.connectors import apify_connector
 
     monkeypatch.setenv("APIFY_TOKEN", "secret-token")
-    monkeypatch.setattr(apify_connector, "run_actor", _fake_dataset)
+    monkeypatch.setattr(apify_connector, "run_actor_result", _fake_result)
 
     result = scheduler.run_live_sync()
     assert result["processed"] is True
@@ -313,7 +328,10 @@ def test_run_live_sync_marks_zero_items(live_db, monkeypatch):
     from app.connectors import apify_connector
 
     monkeypatch.setenv("APIFY_TOKEN", "secret-token")
-    monkeypatch.setattr(apify_connector, "run_actor", lambda *a, **k: [])
+    monkeypatch.setattr(
+        apify_connector, "run_actor_result",
+        lambda *a, **k: apify_connector.ActorRunResult(items=[], ok=True, error=None, status_code=200),
+    )
 
     result = scheduler.run_live_sync()
     assert result["processed"] is True
@@ -331,14 +349,48 @@ def test_run_live_sync_one_actor_error_does_not_crash(live_db, monkeypatch):
 
     monkeypatch.setenv("APIFY_TOKEN", "secret-token")
 
+    def _maybe_error(actor_id, run_input, token, timeout=120):
+        if actor_id == "memo23~businessesforsale-scraper":
+            return apify_connector.ActorRunResult(
+                items=[], ok=False,
+                error="401 Unauthorized: token invalid", status_code=401,
+            )
+        return _fake_result(actor_id, run_input, token, timeout)
+
+    monkeypatch.setattr(apify_connector, "run_actor_result", _maybe_error)
+
+    result = scheduler.run_live_sync()
+    assert result["processed"] is True
+    # The aggregate surfaces the error count + a sample of messages.
+    assert result["error_count"] == 1
+    assert any("401 Unauthorized" in m for m in result["errors"])
+
+    jobs = {j["source_key"]: j for j in store.get_job_statuses()}
+    errored = [j for j in jobs.values() if j["status"] == "error"]
+    assert len(errored) == 1
+    # The REAL Apify error (status code + reason) is surfaced, not a generic one.
+    assert errored[0]["message"] == "401 Unauthorized: token invalid"
+    # All other actors still succeeded (one failure never aborts the others).
+    assert sum(1 for j in jobs.values() if j["status"] == "success") == len(ACTOR_REGISTRY) - 1
+    # A snapshot is still written despite the one failure.
+    snap = store.load_latest_live_snapshot()
+    assert snap is not None and snap["kind"] == "live_sync"
+
+
+def test_run_live_sync_mapping_error_is_contained(live_db, monkeypatch):
+    """A raising run_actor_result (defensive branch) is contained as an error."""
+
+    from app import scheduler
+    from app.connectors import apify_connector
+
+    monkeypatch.setenv("APIFY_TOKEN", "secret-token")
+
     def _maybe_boom(actor_id, run_input, token, timeout=120):
         if actor_id == "memo23~businessesforsale-scraper":
             raise RuntimeError("boom")
-        return _fake_dataset(actor_id, run_input, token, timeout)
+        return _fake_result(actor_id, run_input, token, timeout)
 
-    # run_actor itself swallows errors, but map failures must be contained too;
-    # simulate a raising run_actor to exercise the per-actor error branch.
-    monkeypatch.setattr(apify_connector, "run_actor", _maybe_boom)
+    monkeypatch.setattr(apify_connector, "run_actor_result", _maybe_boom)
 
     result = scheduler.run_live_sync()
     assert result["processed"] is True
@@ -346,3 +398,122 @@ def test_run_live_sync_one_actor_error_does_not_crash(live_db, monkeypatch):
     errored = [j for j in jobs.values() if j["status"] == "error"]
     assert len(errored) == 1
     assert errored[0]["message"].startswith("error:")
+
+
+# --- run_actor_result (mocked HTTP) -----------------------------------------
+
+
+def _resp(status_code=None, json_data=None, text=""):
+    class _R:
+        def __init__(self):
+            self.status_code = status_code
+            self.text = text
+
+        def json(self):
+            if json_data is None:
+                raise ValueError("no json")
+            return json_data
+
+    return _R()
+
+
+def test_run_actor_result_success(monkeypatch):
+    from app.connectors import apify_connector
+
+    items = [{"title": "Deal A", "url": "https://x/a"}, "junk", {"id": "b"}]
+    monkeypatch.setattr(
+        "requests.post", lambda *a, **k: _resp(status_code=200, json_data=items)
+    )
+    result = apify_connector.run_actor_result("a~b", {}, "tok", 30)
+    assert result.ok is True
+    assert result.error is None
+    assert result.status_code == 200
+    # Only dict records survive.
+    assert result.items == [{"title": "Deal A", "url": "https://x/a"}, {"id": "b"}]
+    # The thin wrapper returns just the items list.
+    monkeypatch.setattr(
+        "requests.post", lambda *a, **k: _resp(status_code=200, json_data=items)
+    )
+    assert apify_connector.run_actor("a~b", {}, "tok") == result.items
+
+
+def test_run_actor_result_401(monkeypatch):
+    from app.connectors import apify_connector
+
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *a, **k: _resp(status_code=401, text="token invalid"),
+    )
+    result = apify_connector.run_actor_result("a~b", {}, "tok")
+    assert result.ok is False
+    assert result.status_code == 401
+    assert result.items == []
+    assert "401" in result.error and "Unauthorized" in result.error
+    assert "token invalid" in result.error
+
+
+def test_run_actor_result_404_includes_actor_id(monkeypatch):
+    from app.connectors import apify_connector
+
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *a, **k: _resp(status_code=404, text="not found"),
+    )
+    result = apify_connector.run_actor_result("owner/missing", {}, "tok")
+    assert result.ok is False
+    assert result.status_code == 404
+    # Actor id (tilde form) is embedded in the message.
+    assert "owner~missing" in result.error
+
+
+def test_run_actor_result_413(monkeypatch):
+    from app.connectors import apify_connector
+
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *a, **k: _resp(status_code=413, text="payload too large"),
+    )
+    result = apify_connector.run_actor_result("a~b", {}, "tok")
+    assert result.ok is False
+    assert result.status_code == 413
+    assert "dataset too large" in result.error
+
+
+def test_run_actor_result_timeout(monkeypatch):
+    from app.connectors import apify_connector
+
+    class _Timeout(Exception):
+        pass
+
+    def _boom(*a, **k):
+        raise _Timeout("read timed out")
+
+    monkeypatch.setattr("requests.post", _boom)
+    result = apify_connector.run_actor_result("a~b", {}, "tok", 45)
+    assert result.ok is False
+    assert result.status_code is None
+    assert result.error == "timeout after 45s"
+    # Wrapper still returns [] on failure.
+    monkeypatch.setattr("requests.post", _boom)
+    assert apify_connector.run_actor("a~b", {}, "tok", 45) == []
+
+
+def test_run_actor_result_connection_error(monkeypatch):
+    from app.connectors import apify_connector
+
+    def _boom(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("requests.post", _boom)
+    result = apify_connector.run_actor_result("a~b", {}, "tok")
+    assert result.ok is False
+    assert result.error.startswith("network error:")
+
+
+def test_run_actor_result_without_token():
+    from app.connectors import apify_connector
+
+    result = apify_connector.run_actor_result("a~b", {}, "")
+    assert result.ok is False
+    assert result.items == []
+    assert result.status_code is None

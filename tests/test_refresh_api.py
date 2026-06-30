@@ -75,3 +75,114 @@ def test_sync_noops_safely_without_credentials(client):
     result = run_sync()
     assert result["processed"] is False
     assert result["item_count"] == 0
+
+
+
+# --- /api/sync never 500s ----------------------------------------------------
+
+
+def test_sync_includes_message_and_never_500(client):
+    resp = client.post("/api/sync")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["accepted"] is True
+    assert isinstance(body["message"], str) and body["message"]
+
+
+def test_sync_returns_202_even_when_scheduling_fails(client, monkeypatch):
+    """If queuing the background task raises, /api/sync still returns a clean 202."""
+
+    import app.main as main
+
+    def _boom(*a, **k):
+        raise RuntimeError("queue down")
+
+    # Force the background scheduling to raise; the endpoint must not 500.
+    monkeypatch.setattr(main.BackgroundTasks, "add_task", _boom)
+    resp = client.post("/api/sync")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["accepted"] is False
+    assert "could not start sync" in body["message"]
+
+
+# --- /api/diagnostics --------------------------------------------------------
+
+
+def test_diagnostics_no_token_no_network(client, monkeypatch):
+    monkeypatch.delenv("APIFY_TOKEN", raising=False)
+
+    # Guard: no network call must happen when there is no token.
+    import requests
+
+    def _no_net(*a, **k):
+        raise AssertionError("network must not be called without a token")
+
+    monkeypatch.setattr(requests, "get", _no_net)
+
+    resp = client.get("/api/diagnostics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["token_present"] is False
+    assert body["token_length"] == 0
+    assert body["token_valid"] is None
+    assert body["apify_user"] is None
+    assert body["actor_count"] == 30
+    assert isinstance(body["sync_times"], list)
+    assert body["message"]
+
+
+def test_diagnostics_valid_token(client, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "good-token")
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"data": {"username": "transformbiz", "id": "u123"}}
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp())
+    body = client.get("/api/diagnostics").json()
+    assert body["token_present"] is True
+    assert body["token_length"] == len("good-token")
+    assert body["token_valid"] is True
+    assert body["apify_user"] == "transformbiz"
+    assert body["http_status"] == 200
+
+
+def test_diagnostics_invalid_token_401(client, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "bad-token")
+
+    class _Resp:
+        status_code = 401
+
+        def json(self):
+            return {"error": {"message": "invalid token"}}
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp())
+    body = client.get("/api/diagnostics").json()
+    assert body["token_present"] is True
+    assert body["token_valid"] is False
+    assert body["http_status"] == 401
+    assert body["apify_user"] is None
+    assert "401" in body["message"]
+
+
+def test_diagnostics_network_error_never_500(client, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "some-token")
+
+    import requests
+
+    def _boom(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    resp = client.get("/api/diagnostics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["token_valid"] is False
+    assert "Could not reach Apify" in body["message"]

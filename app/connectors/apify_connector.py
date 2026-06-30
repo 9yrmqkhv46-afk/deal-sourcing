@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..models import SourceItem, SourceType
@@ -183,6 +184,169 @@ def map_apify_item(item: dict[str, Any], source: SourceEntry) -> SourceItem:
     )
 
 
+@dataclass
+class ActorRunResult:
+    """The outcome of a single Apify actor run.
+
+    * ``items``       - the dataset records (always a list of dicts; ``[]`` on
+      any failure so callers never need to null-check).
+    * ``ok``          - ``True`` only when the run completed and returned a
+      well-formed dataset list.
+    * ``error``       - a short, human-readable failure description (status code
+      + a snippet of Apify's response body, a timeout / network message, ...),
+      or ``None`` on success.
+    * ``status_code`` - the HTTP status code when one was received, else
+      ``None``.
+
+    Behaves like a small mapping for convenience: ``result["ok"]`` works as well
+    as ``result.ok``.
+    """
+
+    items: list[dict[str, Any]]
+    ok: bool
+    error: Optional[str]
+    status_code: Optional[int]
+
+    def __getitem__(self, key: str) -> Any:  # dict-style access convenience
+        return getattr(self, key)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "items": self.items,
+            "ok": self.ok,
+            "error": self.error,
+            "status_code": self.status_code,
+        }
+
+
+#: Short, human-friendly hints for the common Apify run-sync failure codes.
+_STATUS_HINTS: dict[int, str] = {
+    400: "bad request",
+    401: "Unauthorized: token invalid",
+    402: "payment required / usage limit",
+    403: "forbidden: token lacks access",
+    404: "actor not found",
+    408: "run timed out",
+    413: "dataset too large",
+    429: "rate limited",
+    500: "Apify server error",
+    502: "Apify bad gateway",
+    503: "Apify service unavailable",
+}
+
+
+def _body_snippet(text: Optional[str], limit: int = 180) -> str:
+    """Return a compact, single-line snippet of a response body (never raises)."""
+
+    if not text:
+        return ""
+    snippet = " ".join(str(text).split())
+    if len(snippet) > limit:
+        snippet = snippet[:limit].rstrip() + "..."
+    return snippet
+
+
+def _http_error_message(status: int, body: Optional[str], actor_id: str) -> str:
+    """Build a real, actionable error string from an HTTP failure.
+
+    Examples: ``"401 Unauthorized: token invalid"``,
+    ``"404 actor not found: owner~name"``, ``"408 run timed out"``,
+    ``"413 dataset too large"`` - always with a snippet of Apify's body when one
+    is present.
+    """
+
+    hint = _STATUS_HINTS.get(status, "request failed")
+    if status == 404:
+        hint = f"actor not found: {actor_id}"
+    snippet = _body_snippet(body)
+    message = f"{status} {hint}"
+    if snippet:
+        message = f"{message}: {snippet}"
+    return message
+
+
+def run_actor_result(
+    actor_id: str,
+    run_input: dict[str, Any],
+    token: str,
+    timeout: int = _DEFAULT_TIMEOUT,
+) -> ActorRunResult:
+    """Run an Apify actor and return a rich :class:`ActorRunResult`.
+
+    POSTs ``run_input`` to
+    ``https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items`` with
+    the token as a query parameter. Unlike the legacy :func:`run_actor` wrapper,
+    this surfaces the REAL failure detail instead of silently degrading to ``[]``:
+
+    * HTTP error -> ``ok=False`` with the status code AND a short snippet of
+      Apify's response body in ``error`` (e.g. ``"401 Unauthorized: token
+      invalid"``, ``"404 actor not found: <id>"``, ``"408 run timed out"``,
+      ``"413 dataset too large"``).
+    * Timeout    -> ``error="timeout after <N>s"``.
+    * Connection -> ``error="network error: <msg>"``.
+
+    It NEVER raises and NEVER fabricates data, so a single bad actor can never
+    crash a live sync. ``actor_id`` may be ``owner/name`` or ``owner~name``; it
+    is normalized to the ``~`` form the REST path expects.
+    """
+
+    if not actor_id or not token:
+        return ActorRunResult(
+            items=[],
+            ok=False,
+            error="missing actor id or token",
+            status_code=None,
+        )
+
+    try:
+        import requests  # local import so the package imports without requests
+    except Exception:  # pragma: no cover - requests is a declared dependency
+        return ActorRunResult(
+            items=[], ok=False, error="requests library not available", status_code=None
+        )
+
+    actor = actor_id.replace("/", "~")
+    url = f"{_APIFY_BASE}/acts/{actor}/run-sync-get-dataset-items"
+
+    try:
+        resp = requests.post(
+            url,
+            params={"token": token},
+            json=run_input or {},
+            timeout=timeout,
+        )
+    except Exception as exc:  # network / timeout errors -> explicit messages
+        name = type(exc).__name__.lower()
+        if "timeout" in name:
+            error = f"timeout after {timeout}s"
+        else:
+            error = f"network error: {exc}"
+        logger.warning("run_actor[%s] %s", actor_id, error)
+        return ActorRunResult(items=[], ok=False, error=error, status_code=None)
+
+    status = getattr(resp, "status_code", None)
+    if isinstance(status, int) and status >= 400:
+        body = getattr(resp, "text", "") or ""
+        error = _http_error_message(status, body, actor)
+        logger.warning("run_actor[%s] failed: %s", actor_id, error)
+        return ActorRunResult(items=[], ok=False, error=error, status_code=status)
+
+    try:
+        payload = resp.json()
+    except Exception as exc:  # malformed JSON body
+        error = f"invalid JSON response: {exc}"
+        logger.warning("run_actor[%s] %s", actor_id, error)
+        return ActorRunResult(items=[], ok=False, error=error, status_code=status)
+
+    if not isinstance(payload, list):
+        error = f"unexpected payload type: {type(payload).__name__}"
+        logger.warning("run_actor[%s] %s", actor_id, error)
+        return ActorRunResult(items=[], ok=False, error=error, status_code=status)
+
+    items = [rec for rec in payload if isinstance(rec, dict)]
+    return ActorRunResult(items=items, ok=True, error=None, status_code=status)
+
+
 def run_actor(
     actor_id: str,
     run_input: dict[str, Any],
@@ -191,53 +355,12 @@ def run_actor(
 ) -> list[dict[str, Any]]:
     """Run an Apify actor and return its dataset items (list[dict]).
 
-    POSTs ``run_input`` to
-    ``https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items`` with
-    the token as a query parameter, and returns the parsed dataset items.
-
-    This call is intentionally defensive: any missing prerequisite, network /
-    HTTP / timeout / JSON error, or unexpected payload shape degrades to ``[]``
-    with a logged warning. It NEVER raises and NEVER fabricates data, so a
-    single bad actor can never crash a live sync.
-
-    ``actor_id`` may be given in either ``owner/name`` or ``owner~name`` form;
-    it is normalized to the ``~`` form the REST path expects.
+    Thin backward-compatible wrapper around :func:`run_actor_result`: it returns
+    just ``result.items`` (``[]`` on any failure) so existing callers / tests
+    keep working. Use :func:`run_actor_result` when you need the real error.
     """
 
-    if not actor_id or not token:
-        logger.warning("run_actor called without actor_id/token; returning no data.")
-        return []
-
-    try:
-        import requests  # local import so the package imports without requests
-    except Exception:  # pragma: no cover - requests is a declared dependency
-        logger.warning("requests not available; run_actor[%s] skipping.", actor_id)
-        return []
-
-    actor = actor_id.replace("/", "~")
-    url = f"{_APIFY_BASE}/acts/{actor}/run-sync-get-dataset-items"
-    try:
-        resp = requests.post(
-            url,
-            params={"token": token},
-            json=run_input or {},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-    except Exception as exc:  # network / HTTP / JSON errors all degrade to []
-        logger.warning("run_actor[%s] failed (%s); returning no data.", actor_id, exc)
-        return []
-
-    if not isinstance(payload, list):
-        logger.warning(
-            "run_actor[%s] unexpected payload type %s; returning no data.",
-            actor_id,
-            type(payload).__name__,
-        )
-        return []
-
-    return [rec for rec in payload if isinstance(rec, dict)]
+    return run_actor_result(actor_id, run_input, token, timeout).items
 
 
 def map_dataset_items(dataset_items: list[dict[str, Any]], source: SourceEntry) -> list[SourceItem]:

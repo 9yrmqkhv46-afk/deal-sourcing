@@ -211,6 +211,13 @@
       </div>
       <p class="view-intro"><b>Apify actor registry — 22 actors.</b> One <code>APIFY_TOKEN</code> drives all of them. Each actor runs via Apify's <code>run-sync-get-dataset-items</code> endpoint and its results flow through the deterministic pipeline. Per-actor inputs can be overridden with <code>APIFY_ACTOR_INPUT_&lt;KEY&gt;</code>. These are third-party Apify actors run under the operator's own Apify account/usage.</p>
       <p class="view-intro"><b>Live API:</b> five read-only endpoints expose live snapshot data (no sample fallback): <code>GET /api/brokers/deals</code>, <code>GET /api/franchises/deals</code>, <code>GET /api/insolvency/opportunities</code>, <code>GET /api/linkedin/posts</code>, <code>GET /api/live/today</code>. They return empty results plus a <code>note</code> until a live sync has run.</p>
+      <div class="diagnostics-row">
+        <button id="run-diagnostics" class="btn" type="button" title="Verify the Apify token works from this server">
+          <svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.5 13.5L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Run diagnostics
+        </button>
+      </div>
+      <div id="diagnostics-box" class="info-banner" hidden role="status" aria-live="polite"></div>
       <div id="actors-grouped"></div>
       <div id="sources-empty" class="empty-state" hidden>No actors registered.</div>
     </section>

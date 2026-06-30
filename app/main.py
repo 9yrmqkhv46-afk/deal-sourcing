@@ -24,6 +24,7 @@ only via the scheduler / ``/api/sync`` and is fully credential-gated.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -38,7 +39,14 @@ from .ingestion import BatchValidationError
 from .models import ProcessRequest
 from .pipeline import process_batch
 from .sample_data import sample_batch
-from .scheduler import run_live_sync, run_sync, shutdown_scheduler, start_scheduler
+from .scheduler import (
+    parse_sync_times,
+    run_live_sync,
+    run_sync,
+    scheduler_enabled,
+    shutdown_scheduler,
+    start_scheduler,
+)
 from .sources import apify_token_present, source_config_status
 from .actors import ACTOR_REGISTRY, CATEGORY_ORDER
 
@@ -250,20 +258,125 @@ def status() -> JSONResponse:
 def sync(background_tasks: BackgroundTasks) -> JSONResponse:
     """Manually trigger a background sync.
 
-    Credential-gated sources still no-op safely. Returns ``accepted`` plus the
-    current job status so the UI can begin polling immediately.
+    Credential-gated sources still no-op safely. This endpoint NEVER returns a
+    500: scheduling the background task is wrapped in a guard so a transient
+    error still yields a clean 202 with ``accepted`` + a ``message``. The
+    current job status is included so the UI can begin polling immediately.
     """
 
-    store.init_db()
-    background_tasks.add_task(run_live_sync)
+    accepted = True
+    message = "sync started"
+    try:
+        store.init_db()
+        background_tasks.add_task(run_live_sync)
+    except Exception as exc:  # pragma: no cover - defensive: never 500 on sync
+        logger.warning("Failed to schedule live sync: %s", exc)
+        accepted = False
+        message = f"could not start sync: {exc}"
+
+    last_synced_at = None
+    jobs: list = []
+    try:
+        last_synced_at = store.get_overall_last_sync()
+        jobs = store.get_job_statuses()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to read job status during sync: %s", exc)
+
     return JSONResponse(
         status_code=202,
         content={
-            "accepted": True,
-            "last_synced_at": store.get_overall_last_sync(),
-            "jobs": store.get_job_statuses(),
+            "accepted": accepted,
+            "message": message,
+            "last_synced_at": last_synced_at,
+            "jobs": jobs,
         },
     )
+
+
+@app.get("/api/diagnostics")
+def diagnostics() -> JSONResponse:
+    """Operator diagnostics: confirm the Apify token works from this host.
+
+    Reports whether an ``APIFY_TOKEN`` is present (and its length only - never
+    the value). When a token is present it calls Apify's ``/v2/users/me``
+    endpoint with a short timeout to verify validity, returning the resolved
+    username when the token is good. On ANY network / HTTP error it returns
+    ``token_valid=false`` with a clear message - it never raises or 500s.
+
+    Shape::
+
+        {
+          "token_present": bool,
+          "token_length": int,
+          "token_valid": true | false | null,   # null when no token to test
+          "apify_user": <username> | null,
+          "http_status": int | null,
+          "message": str,
+          "scheduler_enabled": bool,
+          "sync_times": ["HH:MM", ...],
+          "actor_count": int,
+        }
+    """
+
+    token = (os.environ.get("APIFY_TOKEN") or "").strip()
+    token_present = bool(token)
+
+    try:
+        sync_times = [f"{h:02d}:{m:02d}" for h, m in parse_sync_times()]
+    except Exception:  # pragma: no cover - defensive
+        sync_times = []
+
+    body: dict = {
+        "token_present": token_present,
+        "token_length": len(token),
+        "token_valid": None,
+        "apify_user": None,
+        "http_status": None,
+        "message": "",
+        "scheduler_enabled": scheduler_enabled(),
+        "sync_times": sync_times,
+        "actor_count": len(ACTOR_REGISTRY),
+    }
+
+    if not token_present:
+        body["message"] = "No APIFY_TOKEN configured; set it in the environment to enable live sync."
+        return JSONResponse(content=body)
+
+    try:
+        import requests  # local import so the package imports without requests
+
+        resp = requests.get(
+            "https://api.apify.com/v2/users/me",
+            params={"token": token},
+            timeout=10,
+        )
+        body["http_status"] = getattr(resp, "status_code", None)
+        status = body["http_status"]
+        if isinstance(status, int) and 200 <= status < 300:
+            username = None
+            try:
+                data = resp.json()
+                if isinstance(data, dict):
+                    payload = data.get("data") if isinstance(data.get("data"), dict) else data
+                    username = payload.get("username") or payload.get("id")
+            except Exception:  # pragma: no cover - tolerate odd bodies
+                username = None
+            body["token_valid"] = True
+            body["apify_user"] = username
+            body["message"] = (
+                f"Token is valid (Apify user: {username})." if username else "Token is valid."
+            )
+        else:
+            body["token_valid"] = False
+            if status == 401:
+                body["message"] = "Apify rejected the token (401 Unauthorized) - it is invalid or expired."
+            else:
+                body["message"] = f"Apify returned HTTP {status}; token could not be verified."
+    except Exception as exc:
+        body["token_valid"] = False
+        body["message"] = f"Could not reach Apify to verify the token: {exc}"
+
+    return JSONResponse(content=body)
 
 
 # ---------------------------------------------------------------------------
