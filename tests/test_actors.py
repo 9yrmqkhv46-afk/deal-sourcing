@@ -17,9 +17,13 @@ from app.actors import (
     CATEGORY_AU_DIRECTORIES,
     CATEGORY_AU_GLOBAL_BFS,
     CATEGORY_BIZBUYSELL,
+    CATEGORY_COMPANY_REGISTRIES,
+    CATEGORY_DEAL_MARKETPLACES_EXTRA,
     CATEGORY_LINKEDIN,
+    CATEGORY_LOCAL_DISCOVERY,
     CATEGORY_MA_INTEL,
     CATEGORY_NEWS,
+    CATEGORY_SOCIAL_SEARCH,
     actor_input_env_var,
     linkedin_actors,
     resolve_actor_input,
@@ -30,8 +34,8 @@ from app.models import SourceItem, SourceType
 # --- Registry shape ---------------------------------------------------------
 
 
-def test_registry_has_22_entries():
-    assert len(ACTOR_REGISTRY) == 22
+def test_registry_has_30_entries():
+    assert len(ACTOR_REGISTRY) == 30
 
 
 def test_every_entry_has_required_fields():
@@ -46,7 +50,7 @@ def test_every_entry_has_required_fields():
         assert isinstance(e.is_linkedin, bool)
         seen_keys.add(e.source_key)
     # Source keys are unique across the registry.
-    assert len(seen_keys) == 22
+    assert len(seen_keys) == 30
 
 
 def test_category_counts():
@@ -59,6 +63,23 @@ def test_category_counts():
     assert by_cat[CATEGORY_LINKEDIN] == 4
     assert by_cat[CATEGORY_MA_INTEL] == 3
     assert by_cat[CATEGORY_NEWS] == 3
+    assert by_cat[CATEGORY_DEAL_MARKETPLACES_EXTRA] == 3
+    assert by_cat[CATEGORY_COMPANY_REGISTRIES] == 1
+    assert by_cat[CATEGORY_LOCAL_DISCOVERY] == 1
+    assert by_cat[CATEGORY_SOCIAL_SEARCH] == 3
+
+
+def test_no_bulk_linkedin_people_scrapers_present():
+    """Compliance boundary: no bulk LinkedIn people/profile/employee scrapers."""
+    forbidden = (
+        "profile-scraper",
+        "company-employees",
+        "people-scraper",
+        "employees-bulk",
+    )
+    for e in ACTOR_REGISTRY:
+        for token in forbidden:
+            assert token not in e.actor_id, f"forbidden actor present: {e.actor_id}"
 
 
 def test_source_type_mapping_is_correct():
@@ -266,8 +287,8 @@ def test_run_live_sync_collects_deals_and_linkedin_posts(live_db, monkeypatch):
 
     result = scheduler.run_live_sync()
     assert result["processed"] is True
-    # 18 non-linkedin actors each yield 1 source item.
-    assert result["item_count"] == 18
+    # 26 non-linkedin actors each yield 1 source item.
+    assert result["item_count"] == 26
     # 4 linkedin actors each yield 1 post.
     assert result["linkedin_post_count"] == 4
     assert result["produced_deal_count"] >= 1
@@ -277,7 +298,7 @@ def test_run_live_sync_collects_deals_and_linkedin_posts(live_db, monkeypatch):
     assert snap is not None
     assert snap["kind"] == "live_sync"
     assert snap["synced_at"]
-    assert len(snap["deals"]) == 18
+    assert len(snap["deals"]) == 26
     assert len(snap["linkedin_posts"]) == 4
 
     # Per-actor job messages set.

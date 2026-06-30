@@ -145,11 +145,11 @@ def test_refresh_exposes_snapshot_kind_live(client):
 # --- /api/actors ------------------------------------------------------------
 
 
-def test_actors_endpoint_lists_all_22(client):
+def test_actors_endpoint_lists_all_30(client):
     body = client.get("/api/actors").json()
     assert body["apify_token_present"] is False
-    assert len(body["actors"]) == 22
-    assert len(body["categories"]) == 6
+    assert len(body["actors"]) == 30
+    assert len(body["categories"]) == 10
     li = [a for a in body["actors"] if a["is_linkedin"]]
     assert len(li) == 4
     for a in body["actors"]:

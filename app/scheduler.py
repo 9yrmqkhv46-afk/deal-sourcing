@@ -205,7 +205,7 @@ def _actor_timeout() -> int:
 
 
 def run_live_sync() -> dict:
-    """Run a LIVE sync over the Apify ACTOR_REGISTRY (22 actors).
+    """Run a LIVE sync over the Apify ACTOR_REGISTRY (30 actors).
 
     Behaviour:
 

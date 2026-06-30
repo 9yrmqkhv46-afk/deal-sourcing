@@ -146,10 +146,10 @@ resolvable (`resolved_actor_id_present`, value never leaked) and the exact
 sync; unconfigured sources are reported as `skipped: no API key` (or
 `skipped: no actor` when a token is set but no actor is resolvable).
 
-### Apify actor registry (22 actors) — live sync
+### Apify actor registry (30 actors) — live sync
 
 In addition to the per-source connectors above, the agent ships a fixed
-**Apify ACTOR_REGISTRY of 22 actors** (`app/actors.py`). **One `APIFY_TOKEN`
+**Apify ACTOR_REGISTRY of 30 actors** (`app/actors.py`). **One `APIFY_TOKEN`
 drives all of them** — there are no per-actor tokens. Each actor is run via
 Apify's `run-sync-get-dataset-items` endpoint; non-LinkedIn actors map into the
 deterministic pipeline as `SourceItem`s, and the four LinkedIn actors map into
@@ -163,11 +163,37 @@ deterministic pipeline as `SourceItem`s, and the four LinkedIn actors map into
 | LinkedIn posts | 4 | `social` (`is_linkedin=true`) |
 | M&A intelligence | 3 | `news` |
 | News | 3 | `news` |
+| Deal Marketplaces (extra) | 3 | `marketplace` |
+| Company Registries | 1 | `chamber_directory` |
+| Local Discovery (Google Maps) | 1 | `broker_directory` |
+| Social & Search Signals | 3 | `social` / `news` |
+
+The newer categories use **generic crawler / registry / Maps / search** actors
+(`apify~website-content-crawler`, `apify~cheerio-scraper`,
+`compass~crawler-google-places`, `apify~google-search-scraper`,
+`apidojo~tweet-scraper`, `misceres~indeed-scraper`). The operator may need to
+**verify the actor id exists in their Apify account** and **tune the default
+inputs** for their use case; any actor id missing from the account simply
+degrades to `[]` (the run is a no-op, never an error). All actors run under the
+**operator's own Apify account and usage**. The X/Twitter actor is a social
+deal-signal source and is treated like any other source — it is **not** flagged
+`is_linkedin` and is **not** a LinkedIn people scraper.
+
+> **Compliance note (people-data boundary).** This registry **intentionally
+> excludes bulk LinkedIn personal-profile, company-employee, and
+> people-enumeration scrapers** (e.g. `*-profile-scraper`,
+> `*-company-employees`, `*-people-scraper`, `*-employees-bulk`, premium-profile
+> / lead-harvester style actors). Those harvest individuals' personal data at
+> scale and are excluded on policy grounds, as are any facial/biometric or
+> people-profiling actors. Only **public LinkedIn POST-search** actors are kept
+> (the four `harvestapi`/`datadoping` post actors). A test in
+> `tests/test_actors.py` locks this boundary by asserting none of the excluded
+> actor-id fragments appear in the registry.
 
 **Live-sync-then-refresh flow:**
 
 1. The daily scheduler (or **`POST /api/sync`**, which returns `202` immediately
-   and runs in the background — it never blocks on the 22 slow actors) iterates
+   and runs in the background — it never blocks on the 30 slow actors) iterates
    the registry. Per-actor status is recorded (`success: N items` /
    `fetched 0 items` / `error: <msg>`), and a single failing actor never crashes
    the sync.
@@ -193,7 +219,7 @@ a malformed value is ignored and the default is used.
 
 > These are **third-party Apify actors** run under the **operator's own Apify
 > account and usage** (and billed to it). Review each actor's terms before
-> enabling. `GET /api/actors` lists all 22 with their category, source type,
+> enabling. `GET /api/actors` lists all 30 with their category, source type,
 > `is_linkedin` flag, configured state (driven by `APIFY_TOKEN`) and last-run
 > message.
 
@@ -231,7 +257,7 @@ Then open <http://localhost:8000> and click **Load sample data**.
 - `POST /api/process` — body `{ "batch": [ ...source items... ], "config": { ...overrides? } }` → strict JSON output
 - `GET  /api/sample` — bundled demo batch
 - `GET  /api/sources` — `{ apify_token_present, sources: [ { key, name, source_type, base_url, configured, actor_env_var, actor_source, resolved_actor_id_present, requires, note } ] }`
-- `GET  /api/actors` — the 22-actor Apify registry: `{ apify_token_present, categories: [...], actors: [ { name, actor_id, source_key, source_type, category, is_linkedin, configured, message, status, item_count } ] }`
+- `GET  /api/actors` — the 30-actor Apify registry: `{ apify_token_present, categories: [...], actors: [ { name, actor_id, source_key, source_type, category, is_linkedin, configured, message, status, item_count } ] }`
 - `POST /api/refresh` — re-query the latest DB snapshot (NOT a scrape) → strict keys + `last_synced_at` + `jobs`
 - `GET  /api/status` — `{ last_synced_at, jobs: [...] }` per-source sync status
 - `POST /api/sync` — manually trigger a background sync (credential-gated sources still no-op safely)

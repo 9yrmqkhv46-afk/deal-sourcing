@@ -23,6 +23,18 @@ Categories -> ``source_type`` mapping:
 * CATEGORY 4 "LinkedIn posts"              -> ``social`` (``is_linkedin=True``)
 * CATEGORY 5 "M&A intelligence"            -> ``news``
 * CATEGORY 6 "News"                        -> ``news``
+* CATEGORY 7 "Deal Marketplaces (extra)"   -> ``marketplace``
+* CATEGORY 8 "Company Registries"          -> ``chamber_directory``
+* CATEGORY 9 "Local Discovery (Google Maps)" -> ``broker_directory``
+* CATEGORY 10 "Social & Search Signals"    -> ``social``/``news``
+
+COMPLIANCE NOTE: This registry intentionally EXCLUDES bulk LinkedIn
+personal-profile / company-employee / people-enumeration scrapers (e.g.
+``*-profile-scraper``, ``*-company-employees``, ``*-people-scraper``,
+``*-employees-bulk``). Those harvest individuals' personal data at scale and are
+out of policy. Only public LinkedIn POST-search actors are kept (the four
+``harvestapi``/``datadoping`` post actors). The X/Twitter actor is a social
+deal-signal source (``is_linkedin=False``) and is NOT a LinkedIn people scraper.
 """
 
 from __future__ import annotations
@@ -48,6 +60,10 @@ CATEGORY_AU_DIRECTORIES = "AU Directories"
 CATEGORY_LINKEDIN = "LinkedIn posts"
 CATEGORY_MA_INTEL = "M&A intelligence"
 CATEGORY_NEWS = "News"
+CATEGORY_DEAL_MARKETPLACES_EXTRA = "Deal Marketplaces (extra)"
+CATEGORY_COMPANY_REGISTRIES = "Company Registries"
+CATEGORY_LOCAL_DISCOVERY = "Local Discovery (Google Maps)"
+CATEGORY_SOCIAL_SEARCH = "Social & Search Signals"
 
 #: Stable, ordered list of categories (used by the dashboard grouping).
 CATEGORY_ORDER: tuple[str, ...] = (
@@ -57,6 +73,10 @@ CATEGORY_ORDER: tuple[str, ...] = (
     CATEGORY_LINKEDIN,
     CATEGORY_MA_INTEL,
     CATEGORY_NEWS,
+    CATEGORY_DEAL_MARKETPLACES_EXTRA,
+    CATEGORY_COMPANY_REGISTRIES,
+    CATEGORY_LOCAL_DISCOVERY,
+    CATEGORY_SOCIAL_SEARCH,
 )
 
 
@@ -116,7 +136,7 @@ def _e(
     )
 
 
-# The canonical 22-actor registry. One APIFY_TOKEN drives all of them.
+# The canonical actor registry. One APIFY_TOKEN drives all of them.
 ACTOR_REGISTRY: list[ActorEntry] = [
     # ===================================================================
     # CATEGORY 1 - AU/Global Business For Sale -> marketplace
@@ -361,6 +381,126 @@ ACTOR_REGISTRY: list[ActorEntry] = [
             "limit": 50,
             "keyword_filter": ["Australia"],
         },
+    ),
+    # ===================================================================
+    # CATEGORY 7 - Deal Marketplaces (extra) -> marketplace
+    # Generic content crawlers; operator may need to verify the actor id
+    # and tune inputs. Degrade to [] gracefully when unavailable.
+    # ===================================================================
+    _e(
+        "Acquire.com (content crawler)",
+        "apify~website-content-crawler",
+        SourceType.marketplace,
+        CATEGORY_DEAL_MARKETPLACES_EXTRA,
+        {
+            "startUrls": [{"url": "https://acquire.com/"}],
+            "maxCrawlPages": 100,
+            "maxCrawlDepth": 2,
+        },
+    ),
+    _e(
+        "Smergers Australia (content crawler)",
+        "apify~website-content-crawler",
+        SourceType.marketplace,
+        CATEGORY_DEAL_MARKETPLACES_EXTRA,
+        {
+            "startUrls": [
+                {"url": "https://www.smergers.com/businesses-for-sale/australia/"}
+            ],
+            "maxCrawlPages": 100,
+            "maxCrawlDepth": 2,
+        },
+    ),
+    _e(
+        "AU Broker Sites (generic crawler)",
+        "apify~website-content-crawler",
+        SourceType.marketplace,
+        CATEGORY_DEAL_MARKETPLACES_EXTRA,
+        {
+            "startUrls": [
+                {"url": "https://www.bsale.com.au/"},
+                {"url": "https://www.anybusiness.com.au/"},
+                {"url": "https://linkbusiness.com.au/"},
+                {"url": "https://www.benchmarkbusiness.com.au/"},
+            ],
+            "maxCrawlPages": 150,
+            "maxCrawlDepth": 2,
+        },
+    ),
+    # ===================================================================
+    # CATEGORY 8 - Company Registries -> chamber_directory
+    # ===================================================================
+    _e(
+        "ABR Australian Business Register (generic crawler)",
+        "apify~cheerio-scraper",
+        SourceType.chamber_directory,
+        CATEGORY_COMPANY_REGISTRIES,
+        {
+            "startUrls": [{"url": "https://abr.business.gov.au/"}],
+            "maxRequestsPerCrawl": 100,
+        },
+    ),
+    # ===================================================================
+    # CATEGORY 9 - Local Discovery (Google Maps) -> broker_directory
+    # ===================================================================
+    _e(
+        "Google Maps - Brokers & Liquidators (AU)",
+        "compass~crawler-google-places",
+        SourceType.broker_directory,
+        CATEGORY_LOCAL_DISCOVERY,
+        {
+            "searchStringsArray": [
+                "business broker Australia",
+                "insolvency liquidator Australia",
+                "business sales agent Australia",
+            ],
+            "maxCrawledPlacesPerSearch": 80,
+            "language": "en",
+        },
+    ),
+    # ===================================================================
+    # CATEGORY 10 - Social & Search Signals -> social / news
+    # NOTE: the X/Twitter actor is a SOCIAL deal-signal source and is NOT a
+    # LinkedIn people scraper (is_linkedin stays False); its items flow
+    # through the normal pipeline like any other source.
+    # ===================================================================
+    _e(
+        "X / Twitter Deal Signals",
+        "apidojo~tweet-scraper",
+        SourceType.social,
+        CATEGORY_SOCIAL_SEARCH,
+        {
+            "searchTerms": [
+                "business for sale Australia",
+                "acquisition Australia SME",
+                "franchise for sale Australia",
+            ],
+            "maxItems": 100,
+            "sort": "Latest",
+        },
+    ),
+    _e(
+        "Google Search - Deal Signals (AU)",
+        "apify~google-search-scraper",
+        SourceType.news,
+        CATEGORY_SOCIAL_SEARCH,
+        {
+            "queries": (
+                "business for sale Australia\n"
+                "manufacturing business acquisition Australia\n"
+                "accounting firm for sale Australia"
+            ),
+            "maxPagesPerQuery": 1,
+            "resultsPerPage": 50,
+            "countryCode": "au",
+        },
+    ),
+    _e(
+        "Indeed - Sector Growth Signal (AU)",
+        "misceres~indeed-scraper",
+        SourceType.news,
+        CATEGORY_SOCIAL_SEARCH,
+        {"position": "manufacturing", "country": "AU", "maxItems": 50},
     ),
 ]
 

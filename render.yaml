@@ -20,7 +20,7 @@ services:
       # Credential-gated connectors (leave unset to keep live ingestion idle).
       # Set real values in the Render dashboard's Environment tab.
       #
-      # A SINGLE APIFY_TOKEN drives the entire 22-actor Apify ACTOR_REGISTRY
+      # A SINGLE APIFY_TOKEN drives the entire 30-actor Apify ACTOR_REGISTRY
       # (app/actors.py): the daily scheduler and POST /api/sync run every actor
       # via run-sync-get-dataset-items and store a live_sync snapshot that the
       # live endpoints serve. Per-actor input payloads can be overridden with

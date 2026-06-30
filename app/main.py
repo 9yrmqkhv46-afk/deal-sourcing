@@ -140,7 +140,7 @@ def sources() -> JSONResponse:
 
 @app.get("/api/actors")
 def actors() -> JSONResponse:
-    """Return the 22-actor Apify registry grouped for the Data Sources panel.
+    """Return the 30-actor Apify registry grouped for the Data Sources panel.
 
     Shape::
 
