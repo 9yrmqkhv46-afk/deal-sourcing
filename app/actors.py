@@ -142,18 +142,26 @@ ACTOR_REGISTRY: list[ActorEntry] = [
     # CATEGORY 1 - AU/Global Business For Sale -> marketplace
     # ===================================================================
     _e(
+        # NOTE: this actor's real "location" input is a constrained enum (its
+        # allowed values are unknown to us - the actor rejected "Australia"
+        # with a 400). Omit the field entirely rather than guess again; the
+        # actor runs with its own default scope until an operator confirms
+        # the correct value via APIFY_ACTOR_INPUT_AUSTRALIA_BUSINESS_FOR_SALE.
         "Australia Business For Sale",
         "mai_amm~australia-business-for-sale-scraper",
         SourceType.marketplace,
         CATEGORY_AU_GLOBAL_BFS,
-        {"maxItems": 50, "location": "Australia"},
+        {"maxItems": 50},
     ),
     _e(
+        # NOTE: same issue as above - this actor's "country" input is a
+        # constrained enum that rejected "Australia" with a 400 (the message
+        # started with the allowed value "global"). Omit it rather than guess.
         "BusinessesForSale (solidcode)",
         "solidcode~businesses-for-sale-scraper",
         SourceType.marketplace,
         CATEGORY_AU_GLOBAL_BFS,
-        {"country": "Australia", "maxResults": 50, "minCashFlow": 250000},
+        {"maxResults": 50, "minCashFlow": 250000},
     ),
     _e(
         "BusinessesForSale (memo23)",
