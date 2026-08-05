@@ -1,6 +1,6 @@
 """Apify ACTOR REGISTRY: the catalogue of live deal-sourcing actors.
 
-This module enumerates the 22 Apify actors the deal-sourcing agent runs to pull
+This module enumerates the 30 Apify actors the deal-sourcing agent runs to pull
 LIVE data. One shared ``APIFY_TOKEN`` drives every actor; each actor has a fixed
 ``actor_id`` (Apify ``~`` form), a default ``input`` payload, and a
 ``source_type`` that maps it into the existing deterministic pipeline.
