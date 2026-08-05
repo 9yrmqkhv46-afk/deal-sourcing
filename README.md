@@ -83,7 +83,7 @@ simply stays idle and the seeded sample data is served):
 |----------|---------|---------|
 | `DATABASE_PATH` | SQLite file path | `./data/deal_sourcing.db` |
 | `SCHEDULER_ENABLED` | Enable the daily scheduler | `true` |
-| `SYNC_TIMES` | Comma-separated `HH:MM` daily sync times | `03:00,03:15,03:30,03:45` |
+| `SYNC_TIMES` | Comma-separated `HH:MM` daily sync times | `03:00` |
 | `APIFY_TOKEN` | Apify API token for live actors | _(unset → no-op)_ |
 | `APIFY_DEFAULT_ACTOR` | **Single shared actor id** that drives ANY source without its own actor | _(unset)_ |
 | `APIFY_ACTOR` | Alias for `APIFY_DEFAULT_ACTOR` (used if the former is unset) | _(unset)_ |
@@ -95,8 +95,10 @@ simply stays idle and the seeded sample data is served):
 | `FACEBOOK_GROUP_IDS` | Comma-separated ids/urls of groups you are authorized to read | _(unset → no-op)_ |
 | `FACEBOOK_KEYWORDS` | Optional keyword allow-list passed to your authorized actor | _(unset)_ |
 
-The daily schedule defaults to **03:00, 03:15, 03:30 and 03:45** server time
-and is configurable via `SYNC_TIMES`.
+The daily schedule defaults to a **single run at 03:00** server time and is
+configurable via `SYNC_TIMES`. Kept to once a day by default: each run fans
+out to the full 30-actor Apify registry, so more frequent runs multiply your
+Apify usage/cost for no benefit over a daily refresh.
 
 ### Per-source Apify actor env vars (set in Render's **Environment** tab)
 

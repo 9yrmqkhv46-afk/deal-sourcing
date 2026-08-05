@@ -1,7 +1,10 @@
 """Background scheduler + sync routine for live ingestion.
 
 Uses APScheduler's :class:`BackgroundScheduler` to run a daily sync at fixed
-times (default 03:00, 03:15, 03:30, 03:45; configurable via ``SYNC_TIMES``).
+times (default once daily at 03:00; configurable via ``SYNC_TIMES``). Kept to
+a single run by default because the sync fans out to the full 30-actor Apify
+registry each time - four runs a day quadruples third-party Apify usage/cost
+for no benefit over the "refresh once a day" behaviour this was built for.
 
 The sync routine (:func:`run_sync`) iterates the configured sources, fetches via
 each credential-gated connector, runs the EXISTING ``process_batch`` over the
@@ -30,7 +33,7 @@ from .sources import REGISTRY, apify_token_present, resolve_actor
 
 logger = logging.getLogger("app.scheduler")
 
-DEFAULT_SYNC_TIMES = "03:00,03:15,03:30,03:45"
+DEFAULT_SYNC_TIMES = "03:00"
 
 #: Social sources are gated by their own enable-flag + token (not Apify actors).
 _SOCIAL_KEYS = {"linkedin", "facebook_groups"}
@@ -316,6 +319,25 @@ def run_live_sync() -> dict:
 
     synced_at = _now_iso()
     produced_total = 0
+    if not ran_actors:
+        # Every single actor failed outright (e.g. an account-level 403 from
+        # Apify such as "Monthly usage hard limit exceeded"). Never overwrite
+        # a previously-good live snapshot with an empty one just because this
+        # particular run couldn't reach Apify at all - keep serving the last
+        # real data instead of silently zeroing out the dashboard.
+        logger.warning(
+            "Live sync: all %d actors failed; keeping the previous snapshot.",
+            len(ACTOR_REGISTRY),
+        )
+        return {
+            "processed": False,
+            "item_count": 0,
+            "produced_deal_count": 0,
+            "linkedin_post_count": 0,
+            "actors": [],
+            "error_count": len(error_messages),
+            "errors": error_messages[:5],
+        }
     try:
         output = process_batch(source_items)
         produced_total = len(output.deals)
