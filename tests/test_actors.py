@@ -115,8 +115,10 @@ def test_exactly_four_linkedin_actors_flagged():
 def test_default_inputs_match_spec_examples():
     by_id = {e.actor_id: e for e in ACTOR_REGISTRY}
     # maxResults lowered to 50 to stay within run-sync limits; minCashFlow unchanged.
+    # "country" was dropped after Apify rejected "Australia" with a 400
+    # (constrained enum, real allowed values unknown) - see app/actors.py.
     assert by_id["solidcode~businesses-for-sale-scraper"].input == {
-        "country": "Australia", "maxResults": 50, "minCashFlow": 250000,
+        "maxResults": 50, "minCashFlow": 250000,
     }
     # maxItems lowered from 100 -> 50 to avoid run-sync 408/413.
     assert by_id["scrapesage~bizbuysell-scraper"].input["maxItems"] == 50
