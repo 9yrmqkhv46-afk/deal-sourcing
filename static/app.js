@@ -652,7 +652,7 @@ function renderActors() {
   if (banner) {
     if (!payload.apify_token_present) {
       $("#sources-banner-text").textContent =
-        "Add an Apify API key (APIFY_TOKEN) in Render to drive all 22 actors. Until then the dashboard shows seeded sample data.";
+        "Add an Apify API key (APIFY_TOKEN) in Render to drive all 30 actors. Until then the dashboard shows seeded sample data.";
       banner.hidden = false;
     } else {
       banner.hidden = true;
