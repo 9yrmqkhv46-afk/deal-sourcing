@@ -18,6 +18,7 @@ const state = {
     search: "",
     classification: "all",
     source: "all",
+    sourceName: "all",
     sector: "all",
     minScore: 0,
     franchiseOnly: false,
@@ -239,6 +240,45 @@ function buildFilterOptions() {
   const secSel = $("#f-sector");
   secSel.innerHTML = '<option value="all">All</option>' +
     sectors.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(titleCase(s))}</option>`).join("");
+
+  renderSourcePills(deals);
+}
+
+/* Pill row per source SITE (source_name), with live counts — click to filter.
+ * Mirrors a "swept across connected sources" style source-chooser. */
+function renderSourcePills(deals) {
+  const wrap = $("#source-pills");
+  if (!wrap) return;
+  const counts = new Map();
+  deals.forEach((d) => {
+    const name = d.source_name || "Unknown";
+    counts.set(name, (counts.get(name) || 0) + 1);
+  });
+  const names = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a));
+
+  if (!names.length) { wrap.innerHTML = ""; wrap.hidden = true; return; }
+  wrap.hidden = false;
+
+  const pill = (value, label, count, active) =>
+    `<button type="button" class="source-pill${active ? " active" : ""}" data-source-name="${escapeHtml(value)}" role="tab" aria-selected="${active}">
+      ${escapeHtml(label)} <span class="source-pill-count">${count}</span>
+    </button>`;
+
+  wrap.innerHTML =
+    pill("all", "All sources", deals.length, state.filters.sourceName === "all") +
+    names.map((name) => pill(name, name, counts.get(name), state.filters.sourceName === name)).join("");
+
+  $$("#source-pills .source-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.filters.sourceName = btn.dataset.sourceName;
+      $$("#source-pills .source-pill").forEach((b) => {
+        const active = b.dataset.sourceName === state.filters.sourceName;
+        b.classList.toggle("active", active);
+        b.setAttribute("aria-selected", String(active));
+      });
+      renderDeals();
+    });
+  });
 }
 
 /* ---------------------------- rendering -------------------------------- */
@@ -329,6 +369,7 @@ function filteredDeals() {
     const co = companyOf(d.company_id) || {};
     if (f.classification !== "all" && d.thesis_match.classification !== f.classification) return false;
     if (f.source !== "all" && d.source_type !== f.source) return false;
+    if (f.sourceName !== "all" && d.source_name !== f.sourceName) return false;
     if (f.sector !== "all" && co.sector !== f.sector) return false;
     if (f.franchiseOnly && !d.is_franchise) return false;
     if (f.hideStale && d.is_stale) return false;

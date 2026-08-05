@@ -235,6 +235,26 @@ main { padding: 24px 28px 40px; max-width: 1280px; margin: 0 auto; }
 .toggle input { accent-color: var(--teal); width: 16px; height: 16px; cursor: pointer; }
 .result-count { margin-left: auto; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 
+/* ===================== Source pills ===================== */
+.source-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.source-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .15s, border-color .15s, color .15s;
+}
+.source-pill:hover { border-color: var(--teal); color: var(--text); }
+.source-pill:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.source-pill.active {
+  background: linear-gradient(120deg, var(--navy-grad-a), var(--navy-grad-b));
+  border-color: var(--navy-2); color: #fff;
+}
+.source-pill-count {
+  background: rgba(15, 39, 66, .08); color: var(--muted); border-radius: 999px;
+  padding: 1px 8px; font-size: 11.5px; font-weight: 700;
+}
+.source-pill.active .source-pill-count { background: rgba(255,255,255,.18); color: #eaf2ff; }
+
 /* ===================== Table ===================== */
 .table-card { overflow: hidden; }
 .table-wrap { overflow-x: auto; }
