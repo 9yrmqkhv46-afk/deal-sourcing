@@ -379,6 +379,42 @@ def test_run_live_sync_one_actor_error_does_not_crash(live_db, monkeypatch):
     assert snap is not None and snap["kind"] == "live_sync"
 
 
+def test_run_live_sync_all_actors_error_keeps_previous_snapshot(live_db, monkeypatch):
+    """Reproduces an account-level outage (e.g. Apify monthly usage cap):
+    every actor fails, so the sync must NOT overwrite a previously-good live
+    snapshot with an empty one."""
+
+    from app import scheduler
+    from app.connectors import apify_connector
+
+    monkeypatch.setenv("APIFY_TOKEN", "secret-token")
+    monkeypatch.setattr(apify_connector, "run_actor_result", _fake_result)
+
+    first = scheduler.run_live_sync()
+    assert first["processed"] is True
+    good_snap = store.load_latest_live_snapshot()
+    assert good_snap is not None and len(good_snap["deals"]) == 26
+
+    def _all_403(actor_id, run_input, token, timeout=120):
+        return apify_connector.ActorRunResult(
+            items=[], ok=False,
+            error='403 forbidden: token lacks access: monthly usage hard limit exceeded',
+            status_code=403,
+        )
+
+    monkeypatch.setattr(apify_connector, "run_actor_result", _all_403)
+
+    result = scheduler.run_live_sync()
+    assert result["processed"] is False
+    assert result["error_count"] == len(ACTOR_REGISTRY)
+
+    # The earlier good snapshot is still what's being served, untouched.
+    snap = store.load_latest_live_snapshot()
+    assert snap is not None
+    assert snap["synced_at"] == good_snap["synced_at"]
+    assert len(snap["deals"]) == 26
+
+
 def test_run_live_sync_mapping_error_is_contained(live_db, monkeypatch):
     """A raising run_actor_result (defensive branch) is contained as an error."""
 
