@@ -1,0 +1,71 @@
+{
+  "title": "AU Broker Listing Crawler input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrls": {
+      "title": "Start URLs",
+      "type": "array",
+      "description": "One or more listing/search-results pages to crawl for this site (e.g. a category or \"all listings\" page). Each site you configure this actor for gets its own run with its own startUrls.",
+      "editor": "requestListSources",
+      "prefill": [{ "url": "https://example.com/businesses-for-sale" }]
+    },
+    "itemLinkPattern": {
+      "title": "Detail-link substring/pattern (optional)",
+      "type": "string",
+      "description": "A substring (or simple regex) that real listing-detail URLs on this site contain, e.g. \"/listing/\" or \"/business-for-sale/\". Used to tell real listings apart from navigation/footer links. Leave blank to use the generic heuristic (link text length + href shape).",
+      "editor": "textfield",
+      "prefill": ""
+    },
+    "itemSelector": {
+      "title": "List-page item CSS selector (optional)",
+      "type": "string",
+      "description": "CSS selector for the repeating listing-card element on the START URL itself (e.g. \".listing-card\"), when you want to extract title/price/location directly from the list page instead of following into each detail page. Leave blank to auto-discover detail links and follow them instead.",
+      "editor": "textfield",
+      "prefill": ""
+    },
+    "followDetailPages": {
+      "title": "Follow into each listing's detail page",
+      "type": "boolean",
+      "description": "When true (default), the actor visits each discovered listing URL and extracts from the full detail page (richer, but more requests). When false, it only extracts what's visible on the start/list page (faster, cheaper, thinner data).",
+      "default": true
+    },
+    "maxItems": {
+      "title": "Max items per run",
+      "type": "integer",
+      "description": "Stop after collecting this many listings.",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 500
+    },
+    "maxCrawlPages": {
+      "title": "Max pages to visit",
+      "type": "integer",
+      "description": "Hard cap on total pages fetched (list pages + detail pages), independent of maxItems, so a misconfigured run can't run away.",
+      "default": 120,
+      "minimum": 1,
+      "maximum": 2000
+    },
+    "renderJs": {
+      "title": "Render JavaScript (headless browser)",
+      "type": "boolean",
+      "description": "Off by default (cheap, fast HTML-only fetch via Cheerio). Turn on only if the site needs JS to render listings - it costs significantly more compute credit per page.",
+      "default": false
+    },
+    "respectRobotsTxt": {
+      "title": "Respect robots.txt",
+      "type": "boolean",
+      "description": "When true (default), the actor fetches the site's robots.txt once per run and skips any URL disallowed for its user agent.",
+      "default": true
+    },
+    "maxConcurrency": {
+      "title": "Max concurrent requests",
+      "type": "integer",
+      "description": "Kept low by default to be a well-behaved, low-load crawler against small broker sites.",
+      "default": 2,
+      "minimum": 1,
+      "maximum": 10
+    }
+  },
+  "required": ["startUrls"]
+}

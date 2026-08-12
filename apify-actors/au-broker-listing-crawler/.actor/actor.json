@@ -1,0 +1,15 @@
+{
+  "actorSpecification": 1,
+  "name": "au-broker-listing-crawler",
+  "title": "AU Broker Listing Crawler",
+  "description": "Generic, configurable crawler for Australian business-broker / business-for-sale listing sites. One actor, driven entirely by input (startUrls + optional selector/pattern overrides) so a single deployed actor can serve every broker site instead of one bespoke actor per site.",
+  "version": "1.0",
+  "input": "./input_schema.json",
+  "dockerfile": "../Dockerfile",
+  "storages": {
+    "dataset": {
+      "actorSpecification": 1,
+      "fields": {}
+    }
+  }
+}
