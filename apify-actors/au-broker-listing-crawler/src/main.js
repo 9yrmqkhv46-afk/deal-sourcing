@@ -357,8 +357,14 @@ async function handleListPage($, request, enqueueLinks, log) {
     const remaining = Math.max(0, maxItems - itemsPushed);
     const urls = candidates.slice(0, remaining).map((c) => c.absUrl);
     if (urls.length) {
-        log.info(`Enqueuing ${urls.length} detail page(s) from ${base}`);
-        await enqueueLinks({ urls, userData: { label: 'DETAIL' } });
+        log.info(`Found ${urls.length} candidate detail link(s) on ${base}:`);
+        urls.forEach((u) => log.info(`  -> ${u}`));
+        const result = await enqueueLinks({ urls, userData: { label: 'DETAIL' } });
+        const added = result?.processedRequests?.filter((r) => !r.wasAlreadyPresent).length ?? 'unknown';
+        const skippedDupe = result?.processedRequests?.filter((r) => r.wasAlreadyPresent).length ?? 0;
+        log.info(`Enqueue result: ${added} newly added, ${skippedDupe} already-seen/duplicate (of ${urls.length} candidates).`);
+    } else {
+        log.info(`No candidate detail links found on ${base} (0 links passed the heuristic/itemLinkPattern).`);
     }
 }
 
