@@ -127,7 +127,7 @@ def test_diagnostics_no_token_no_network(client, monkeypatch):
     assert body["token_length"] == 0
     assert body["token_valid"] is None
     assert body["apify_user"] is None
-    assert body["actor_count"] == 30
+    assert body["actor_count"] == 31
     assert isinstance(body["sync_times"], list)
     assert body["message"]
 
