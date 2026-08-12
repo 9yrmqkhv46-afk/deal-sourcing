@@ -46,11 +46,32 @@
       "minimum": 1,
       "maximum": 2000
     },
+    "crawlerMode": {
+      "title": "Crawler engine",
+      "type": "string",
+      "description": "\"cheerio\" (default, cheap, no browser) for plain HTML sites. \"playwright\" renders JS with a headless browser - costs more per page. \"playwright-stealth\" adds an anti-bot-detection plugin on top of Playwright, for sites behind Cloudflare/PerimeterX - costs the most, and is best-effort (never verified against a real protected site from this project's sandbox).",
+      "editor": "select",
+      "enum": ["cheerio", "playwright", "playwright-stealth"],
+      "default": "cheerio"
+    },
     "renderJs": {
-      "title": "Render JavaScript (headless browser)",
+      "title": "Render JavaScript (legacy alias)",
       "type": "boolean",
-      "description": "Off by default (cheap, fast HTML-only fetch via Cheerio). Turn on only if the site needs JS to render listings - it costs significantly more compute credit per page.",
+      "description": "Back-compat alias for crawlerMode: \"playwright\" when crawlerMode is left unset. Prefer setting crawlerMode directly.",
       "default": false
+    },
+    "useApifyProxy": {
+      "title": "Use Apify Proxy",
+      "type": "boolean",
+      "description": "Route requests through Apify Proxy. Usually paired with crawlerMode \"playwright-stealth\" for a protected site. Costs extra; verify your Apify plan includes the proxy groups you select.",
+      "default": false
+    },
+    "proxyGroups": {
+      "title": "Apify Proxy groups",
+      "type": "array",
+      "description": "e.g. [\"RESIDENTIAL\"] for a site with real anti-bot protection. Leave empty for Apify's default datacenter pool. RESIDENTIAL proxy access/cost varies by Apify plan - check your account before relying on it.",
+      "editor": "stringList",
+      "prefill": []
     },
     "respectRobotsTxt": {
       "title": "Respect robots.txt",
