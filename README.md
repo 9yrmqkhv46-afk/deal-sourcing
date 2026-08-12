@@ -45,6 +45,9 @@ app/store.py     SQLite persistence (snapshots + sync-job status)
 app/scheduler.py APScheduler daily sync routine
 static/       Dashboard (index.html, app.js, styles.css) — no build step
 tests/        pytest unit tests + hypothesis property tests (P1–P17)
+apify-actors/au-broker-listing-crawler/  A custom, deployable Apify actor
+              (Node.js + Crawlee) for the AU broker sites — deploy it
+              yourself via the Apify CLI; see its own README.
 requirements.txt, render.yaml, Procfile, .gitignore
 ```
 
