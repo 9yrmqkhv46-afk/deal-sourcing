@@ -184,13 +184,16 @@ function extractAmountRange(text) {
     return [low, high];
 }
 
-/** Numeric asking price (or [low, high] range), or null - never fabricated. */
+/** Numeric asking price (or [low, high] range), or null - never fabricated.
+ * Deliberately does NOT fall back to "the first bare $amount anywhere on the
+ * page" - real-world testing against seekbusiness.com.au found that fallback
+ * picking up unrelated dollar figures from marketing copy (an industry-size
+ * stat, a listing-fee price) as if they were the business's asking price. A
+ * missed price (null) is fine; a wrong one silently poisoning a Deal is not. */
 function extractAskingPriceValue(text) {
-    const labeled = extractLabeledAmount(text, ['asking price', 'price guide', 'price']);
+    const labeled = extractLabeledAmount(text, ['asking price', 'asking', 'price guide', 'price']);
     if (labeled != null) return labeled;
-    const range = extractAmountRange(text);
-    if (range) return range;
-    return parseAmountToken(extractAmount(text));
+    return extractAmountRange(text);
 }
 
 /** Find "<label>[:/-] $amount" (case-insensitive); null if the label never appears. */
@@ -238,9 +241,20 @@ function extractBrokerContact(jsonLd, text) {
             };
         }
     }
-    const m = (text || '').match(/\b(?:agent|broker|listed by|contact)\s*[:\-]?\s*([A-Z][a-zA-Z'\-]+(?:\s[A-Z][a-zA-Z'\-]+){1,2})/i);
-    if (m) return { person_or_org_name: m[1].trim(), role_or_title: 'Broker' };
-    return null;
+    // Two-step, not one case-insensitive regex: applying /i to the whole
+    // pattern also makes [A-Z] match lowercase letters, defeating the
+    // capitalization check entirely (real-world testing caught this - it
+    // extracted "please visit our" as a person's name from unrelated nav
+    // copy). Find the label case-insensitively, then require a real
+    // Capitalized-looking name case-sensitively right after it, and require
+    // a ":"/"-" separator (not just the bare word) to avoid matching generic
+    // nav text like "Contact us".
+    if (!text) return null;
+    const labelMatch = text.match(/\b(?:agent|broker|listed by|contact)\s*[:\-]\s*/i);
+    if (!labelMatch) return null;
+    const rest = text.slice(labelMatch.index + labelMatch[0].length);
+    const nameMatch = rest.match(/^([A-Z][a-zA-Z'\-]+(?:\s[A-Z][a-zA-Z'\-]+){1,2})/);
+    return nameMatch ? { person_or_org_name: nameMatch[1].trim(), role_or_title: 'Broker' } : null;
 }
 
 function looksLikeDetailLink(href, text, pattern) {
