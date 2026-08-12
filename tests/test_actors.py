@@ -34,8 +34,8 @@ from app.models import SourceItem, SourceType
 # --- Registry shape ---------------------------------------------------------
 
 
-def test_registry_has_30_entries():
-    assert len(ACTOR_REGISTRY) == 30
+def test_registry_has_31_entries():
+    assert len(ACTOR_REGISTRY) == 31
 
 
 def test_every_entry_has_required_fields():
@@ -50,14 +50,14 @@ def test_every_entry_has_required_fields():
         assert isinstance(e.is_linkedin, bool)
         seen_keys.add(e.source_key)
     # Source keys are unique across the registry.
-    assert len(seen_keys) == 30
+    assert len(seen_keys) == 31
 
 
 def test_category_counts():
     by_cat: dict[str, int] = {}
     for e in ACTOR_REGISTRY:
         by_cat[e.category] = by_cat.get(e.category, 0) + 1
-    assert by_cat[CATEGORY_AU_GLOBAL_BFS] == 5
+    assert by_cat[CATEGORY_AU_GLOBAL_BFS] == 6
     assert by_cat[CATEGORY_BIZBUYSELL] == 4
     assert by_cat[CATEGORY_AU_DIRECTORIES] == 3
     assert by_cat[CATEGORY_LINKEDIN] == 4
@@ -304,8 +304,8 @@ def test_run_live_sync_collects_deals_and_linkedin_posts(live_db, monkeypatch):
 
     result = scheduler.run_live_sync()
     assert result["processed"] is True
-    # 26 non-linkedin actors each yield 1 source item.
-    assert result["item_count"] == 26
+    # 27 non-linkedin actors each yield 1 source item.
+    assert result["item_count"] == 27
     # 4 linkedin actors each yield 1 post.
     assert result["linkedin_post_count"] == 4
     assert result["produced_deal_count"] >= 1
@@ -315,7 +315,7 @@ def test_run_live_sync_collects_deals_and_linkedin_posts(live_db, monkeypatch):
     assert snap is not None
     assert snap["kind"] == "live_sync"
     assert snap["synced_at"]
-    assert len(snap["deals"]) == 26
+    assert len(snap["deals"]) == 27
     assert len(snap["linkedin_posts"]) == 4
 
     # Per-actor job messages set.
@@ -393,7 +393,7 @@ def test_run_live_sync_all_actors_error_keeps_previous_snapshot(live_db, monkeyp
     first = scheduler.run_live_sync()
     assert first["processed"] is True
     good_snap = store.load_latest_live_snapshot()
-    assert good_snap is not None and len(good_snap["deals"]) == 26
+    assert good_snap is not None and len(good_snap["deals"]) == 27
 
     def _all_403(actor_id, run_input, token, timeout=120):
         return apify_connector.ActorRunResult(
@@ -412,7 +412,7 @@ def test_run_live_sync_all_actors_error_keeps_previous_snapshot(live_db, monkeyp
     snap = store.load_latest_live_snapshot()
     assert snap is not None
     assert snap["synced_at"] == good_snap["synced_at"]
-    assert len(snap["deals"]) == 26
+    assert len(snap["deals"]) == 27
 
 
 def test_run_live_sync_mapping_error_is_contained(live_db, monkeypatch):

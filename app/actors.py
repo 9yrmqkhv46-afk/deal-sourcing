@@ -184,6 +184,25 @@ ACTOR_REGISTRY: list[ActorEntry] = [
         CATEGORY_AU_GLOBAL_BFS,
         {"maxItems": 50},
     ),
+    _e(
+        # Custom in-house actor (apify-actors/au-broker-listing-crawler in
+        # this repo), deployed under the operator's own Apify account and
+        # linked directly to this GitHub repo/branch. Verified end-to-end
+        # against real bsale.com.au listings: discovers detail pages via the
+        # site's schema.org ItemList, extracts title/asking_price/ebitda with
+        # correct price-vs-profit disambiguation. maxItems kept low to start
+        # - raise via APIFY_ACTOR_INPUT_BSALE once real daily credit cost is
+        # known.
+        "Bsale",
+        "wholesome_slush~deal-sourcing",
+        SourceType.marketplace,
+        CATEGORY_AU_GLOBAL_BFS,
+        {
+            "startUrls": ["https://bsale.com.au/businesses-for-sale"],
+            "crawlerMode": "cheerio",
+            "maxItems": 25,
+        },
+    ),
     # ===================================================================
     # CATEGORY 2 - BizBuySell -> marketplace
     # ===================================================================
