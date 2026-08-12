@@ -190,19 +190,41 @@ function extractAmountRange(text) {
  * picking up unrelated dollar figures from marketing copy (an industry-size
  * stat, a listing-fee price) as if they were the business's asking price. A
  * missed price (null) is fine; a wrong one silently poisoning a Deal is not. */
-function extractAskingPriceValue(text) {
+function extractAskingPriceValue(text, title) {
+    // Real broker sites often embed the price directly in the listing title
+    // ("Established Earthmoving Business For Sale - $950,000!") rather than
+    // as a labelled sentence. A bare $ match is safe here (unlike scanning
+    // the whole page body - see the "$184 billion" bug above) because a
+    // title is short and specific to this one listing. BUT titles just as
+    // often embed a different figure entirely ("$250,000 Net Profit") - so
+    // skip title extraction whenever a profit/revenue-type word sits next to
+    // the dollar amount, rather than risk mislabelling that as the price.
+    if (title) {
+        const disqualified = /\$[\d,.]+\s?(?:k|K|m|M)?\s*(?:p\.?a\.?|per\s*(?:week|annum|year)|\/?\s*wk|net\s*profit|profit|revenue|turnover|ebitda|income|sav)\b/i
+            .test(title);
+        if (!disqualified) {
+            const titlePrice = parseAmountToken(extractAmount(title));
+            if (titlePrice != null) return titlePrice;
+        }
+    }
     const labeled = extractLabeledAmount(text, ['asking price', 'asking', 'price guide', 'price']);
     if (labeled != null) return labeled;
     return extractAmountRange(text);
 }
 
-/** Find "<label>[:/-] $amount" (case-insensitive); null if the label never appears. */
+/** Find "<label>[:/-] $amount" OR "$amount <label>" (case-insensitive) -
+ * both orders appear in the wild ("Net Profit: $250,000" in body copy,
+ * "$250,000 Net Profit" in a title). Null if the label never appears near
+ * an amount either way. */
 function extractLabeledAmount(text, labels) {
     if (!text) return null;
     const alt = labels.map((l) => l.replace(/\s+/g, '\\s*')).join('|');
-    const re = new RegExp(`(?:${alt})\\s*[:\\-]?\\s*(\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?(?:k|K|m|M)?)`, 'i');
-    const m = text.match(re);
-    return m ? parseAmountToken(m[1]) : null;
+    const forward = new RegExp(`(?:${alt})\\s*[:\\-]?\\s*(\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?(?:k|K|m|M)?)`, 'i');
+    const mForward = text.match(forward);
+    if (mForward) return parseAmountToken(mForward[1]);
+    const backward = new RegExp(`(\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?(?:k|K|m|M)?)\\s*(?:${alt})`, 'i');
+    const mBackward = text.match(backward);
+    return mBackward ? parseAmountToken(mBackward[1]) : null;
 }
 
 function extractLocationText(text) {
@@ -271,7 +293,7 @@ function looksLikeDetailLink(href, text, pattern) {
 /** Build the pipeline-aligned record shared by both list- and detail-page extraction. */
 function buildRecord({ url, title, descriptionCandidate, bodyText, jsonLd = [], meta = {} }) {
     const description = descriptionCandidate ? cleanText(descriptionCandidate, 800) : null;
-    const askingPriceValue = extractAskingPriceValue(bodyText);
+    const askingPriceValue = extractAskingPriceValue(bodyText, title);
     const askingPriceText = extractAmount(bodyText);
     const revenue = extractLabeledAmount(bodyText, ['revenue', 'turnover', 'annual revenue']);
     const ebitda = extractLabeledAmount(bodyText, ['ebitda', 'net profit', 'cash\\s*flow', 'sde']);
