@@ -305,6 +305,24 @@ function buildRecord({ url, title, descriptionCandidate, bodyText, jsonLd = [], 
     return Object.fromEntries(Object.entries(record).filter(([, v]) => v !== undefined));
 }
 
+/** Real listing URLs from a schema.org ItemList, if the page has one - far
+ * more reliable than guessing from anchor tags. Handles both the direct
+ * `{url: "..."}` and nested `{item: {url|@id: "..."}}` ListItem shapes. */
+function extractItemListUrls(jsonLd, base) {
+    const urls = [];
+    for (const block of jsonLd) {
+        if (block?.['@type'] !== 'ItemList') continue;
+        const elements = Array.isArray(block.itemListElement) ? block.itemListElement : [];
+        for (const el of elements) {
+            const raw = el?.url || el?.item?.url || el?.item?.['@id'];
+            if (!raw) continue;
+            const abs = absolutize(raw, base);
+            if (abs) urls.push(abs);
+        }
+    }
+    return [...new Set(urls)];
+}
+
 function extractDetailRecord($, url) {
     const bodyText = cleanText($('body').text(), 6000);
     const jsonLd = extractJsonLd($);
@@ -430,10 +448,31 @@ const sharedRequestHandler = async (context) => {
     }
 
     const $ = context.$ ?? (await context.parseWithCheerio());
+    const base = request.loadedUrl || request.url;
     const label = request.userData?.label;
 
+    // A page with its own schema.org ItemList is an index/category page
+    // (e.g. a state-filtered "businesses for sale" page), not an individual
+    // listing - even if it was reached via a DETAIL-labelled link (real-world
+    // testing against bsale.com.au found exactly this: a state filter page
+    // like /businesses-for-sale/vic has its own ItemList of ~20 real listing
+    // URLs, and was wrongly extracted as if it were one listing itself before
+    // this check existed). Follow its real listing URLs instead.
+    const itemListUrls = extractItemListUrls(extractJsonLd($), base);
+    if (itemListUrls.length) {
+        const remaining = Math.max(0, maxItems - itemsPushed);
+        const urls = itemListUrls.slice(0, remaining);
+        reqLog.info(`Found a schema.org ItemList with ${itemListUrls.length} real listing URL(s) on ${base}; following ${urls.length}:`);
+        urls.forEach((u) => reqLog.info(`  -> ${u}`));
+        const result = await enqueueLinks({ urls, userData: { label: 'DETAIL' } });
+        const added = result?.processedRequests?.filter((r) => !r.wasAlreadyPresent).length ?? 'unknown';
+        const skippedDupe = result?.processedRequests?.filter((r) => r.wasAlreadyPresent).length ?? 0;
+        reqLog.info(`Enqueue result: ${added} newly added, ${skippedDupe} already-seen/duplicate.`);
+        return;
+    }
+
     if (label === 'DETAIL') {
-        const record = extractDetailRecord($, request.loadedUrl || request.url);
+        const record = extractDetailRecord($, base);
         if (record.title || record.description || record.asking_price != null || record.askingPrice) {
             await Dataset.pushData(record);
             itemsPushed += 1;
