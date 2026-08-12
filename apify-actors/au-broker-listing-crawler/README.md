@@ -44,20 +44,64 @@ first run against each real site as a test, with `maxItems` kept small.
 
 ## Output shape
 
-Each pushed dataset record matches the deal-sourcing agent's existing
-tolerant field-probing, so no changes are needed on the consuming side:
+Each pushed dataset record uses the **exact keys the deal-sourcing agent's
+pipeline actually reads** (`app/handlers.py`'s `RawFields`), with numeric
+`asking_price`/`revenue`/`ebitda` — not formatted strings. This was a real
+bug in the first version of this actor: it emitted `askingPrice` as a string
+like `"$1,250,000"` and `location` instead of `location_text`, and the
+pipeline's financial-figure extraction *only* trusts already-numeric
+structured fields (per `handlers.py`'s own docstring, it deliberately never
+parses money out of free text) — so a perfectly successful scrape would
+still have shown up with `asking_price: null` downstream. Fixed now;
+verified locally that a Deal's numeric fields actually populate.
 
 ```json
 {
   "url": "https://example.com/listing/...",
   "title": "Established Packaging Manufacturer - VIC",
   "description": "Profitable packaging business...",
-  "askingPrice": "$1,250,000",
+  "location_text": "Melbourne, VIC",
+  "state": "VIC",
+  "asking_price": 1250000,
+  "asking_price_currency": "AUD",
+  "revenue": 2400000,
+  "revenue_currency": "AUD",
+  "ebitda": 480000,
+  "ebitda_currency": "AUD",
+  "listing_date": "2026-06-01",
+  "contacts": [ { "person_or_org_name": "Sarah Whitman", "role_or_title": "Broker" } ],
   "location": "Melbourne, VIC",
+  "askingPrice": "$1,250,000",
   "jsonLd": [ { "...": "..." } ],
   "raw_text": "full extracted page text, for the pipeline's own extraction"
 }
 ```
+
+`revenue`/`ebitda`/`listing_date`/`contacts` are genuinely best-effort and
+often absent (most listings don't publish exact financials openly) —
+consistent with the pipeline's own "never fabricate, null over guess"
+philosophy. `location`/`askingPrice` (string) are kept as back-compat
+aliases for the pipeline's separate lenient text-blob prober; they aren't
+what actually populates a Deal's financials.
+
+## Crawler engine (`crawlerMode`)
+
+| Mode | Cost | When to use |
+|---|---|---|
+| `cheerio` (default) | Cheap | Plain server-rendered HTML — most of these sites |
+| `playwright` | Moderate | Listings only appear after client-side JS rendering |
+| `playwright-stealth` | Highest | Site is behind Cloudflare/PerimeterX-style bot detection |
+
+`playwright-stealth` uses `playwright-extra` + the `puppeteer-extra-plugin-stealth`
+plugin (a documented, valid combination — the stealth plugin ecosystem is
+shared across puppeteer-extra and playwright-extra). This was verified to
+run without crashing against a plain test site, but **anti-bot bypass is
+inherently adversarial and was never tested against a real protected site**
+(no network access to one from this project's sandbox) — treat the first
+real run as a test, and consider pairing it with `useApifyProxy: true` +
+`proxyGroups: ["RESIDENTIAL"]` if the site still blocks it. Verify your
+Apify plan actually includes residential proxy access/cost before relying
+on that combination for a daily sync.
 
 ## Deploy it
 
@@ -79,25 +123,42 @@ for manual testing and for wiring it into the deal-sourcing agent.
 ## Configure it per site
 
 Run it once per site from the Apify Console (or `apify call`), with a small
-`maxItems` (5–10) as a first test. Starting points for the sites you named —
-**these are homepage-level guesses, not verified listing-page URLs**: open
-each site yourself, find its actual "browse all businesses for sale" page,
-and put *that* URL in `startUrls` instead for real coverage.
+`maxItems` (5–10) as a first test. Starting points below are
+**homepage/section-level guesses, not verified listing-page URLs or
+selectors** — this project has no network access to confirm any of them.
+Open each site yourself, find its actual "browse all listings" page, and
+refine `startUrls` (and `itemSelector`/`itemLinkPattern` if the generic
+heuristic doesn't find real listings) before relying on it.
 
-| Site | Starting `startUrls` (verify/replace before real use) |
-|---|---|
-| BusinessForSale.com.au | `https://www.businessforsale.com.au` |
-| Bsale | `https://www.bsale.com.au` |
-| AnyBusiness | `https://www.anybusiness.com.au` |
-| AllBusiness.com.au | `https://www.allbusiness.com.au` |
-| LINK Business Brokers | `https://linkbusiness.com.au` |
-| SBX Business Brokers | `https://www.sbxbusiness.com.au` |
-| Resolve Marketplace | `https://www.resolve.com.au` |
-| Benchmark Business | `https://www.benchmarkbusiness.com.au` |
-| BusinessesForSale.com (Australia) | `https://www.businessesforsale.com/australia` |
-| Franchise2Sell | `https://www.franchise2sell.com.au` |
-| scaling.com.au | `https://scaling.com.au` |
-| scalingup.com.au | `https://scalingup.com.au` |
+### Business broking marketplaces (free/public, no login)
+
+| Site | Starting `startUrls` | `crawlerMode` |
+|---|---|---|
+| Seek Business | `https://www.seekbusiness.com.au` | `playwright-stealth` — flagged as Cloudflare/PerimeterX-protected |
+| AnyBusiness | `https://www.anybusiness.com.au` | `cheerio` |
+| BusinessesForSale Australia | `https://australia.businessesforsale.com` | `cheerio` |
+| CommercialRealEstate.com.au (business portal) | `https://www.commercialrealestate.com.au/business-for-sale` | `playwright-stealth` — flagged as Cloudflare/PerimeterX-protected |
+| Bsale | `https://www.bsale.com.au` | `cheerio` |
+| Business2Sell | `https://www.business2sell.com.au` | `cheerio` |
+| BusinessSales.com.au | `https://app.businesssales.com.au` | `cheerio`; try `playwright` if 0 items (an `app.` subdomain often means a JS-rendered app) |
+| LINK Business Brokers | `https://www.linkbusiness.com.au` | `cheerio` |
+| The Finn Group | `https://www.thefinngroup.com.au` | `cheerio` |
+| DealStream Australia | `https://dealstream.com/australia-businesses-for-sale` | `cheerio` |
+
+### Liquidator / distressed-asset channels (free/public)
+
+| Site | Starting `startUrls` | `crawlerMode` | Notes |
+|---|---|---|---|
+| ASIC Published Notices | `https://publishednotices.asic.gov.au` | `cheerio` | ASP.NET site — if the real search is a POST-form submission (not a plain browsable list), the generic actor won't reach results; it'll likely need a small bespoke follow-up (Playwright filling/submitting the search form) once you've looked at it |
+| AFSA / National Personal Insolvency Index | `https://www.afsa.gov.au` | `cheerio` | You gave a name, not a URL — find the actual NPII search-results page first |
+| McGrathNicol Deals | `https://www.mcgrathnicol.com/deals` | `cheerio` |
+| KordaMentha Restructuring | `https://www.kordamentha.com` | `cheerio` | Homepage only — find their actual "assets for sale" section |
+| BRI Ferrier Insolvency Listings | `https://www.briferrier.com.au` | `cheerio` |
+| FTI Consulting Australia | `https://www.fticonsulting.com/au` | `cheerio` | Domain guessed — verify |
+| RSM Australia | `https://www.rsm.global/australia` | `cheerio` | Domain guessed — verify |
+| Grays | `https://www.grays.com` | `playwright` — likely a JS-heavy auction-listing app; try `cheerio` first, it's cheaper |
+| Pickles Auctions | `https://www.pickles.com.au` | `playwright` — same reasoning as Grays |
+| Lloyds Auctions | `https://www.lloydsauctions.com.au` | `playwright` — same reasoning as Grays |
 
 For each site, after a first run:
 
@@ -111,12 +172,13 @@ For each site, after a first run:
 
 ## Wire a working config into the deal-sourcing agent
 
-Once you have a real actor ID and a working `startUrls`/`itemSelector` per
-site, send them back and they get added to `app/actors.py`'s
-`ACTOR_REGISTRY` — twelve entries reusing the **same** actor ID with
-different `input`, exactly like the existing `apify~website-content-crawler`
-entries already do. Only `APIFY_TOKEN` is then needed to drive them (per the
-project's live-sync docs) — no per-site env vars required.
+Once you have a real actor ID and a working `startUrls`/`itemSelector`/
+`crawlerMode` per site, send them back and they get added to
+`app/actors.py`'s `ACTOR_REGISTRY` — one entry per site, all reusing the
+**same** actor ID with different `input`, exactly like the existing
+`apify~website-content-crawler` entries already do. Only `APIFY_TOKEN` is
+then needed to drive them (per the project's live-sync docs) — no per-site
+env vars required.
 
 ## Cost and politeness
 
@@ -124,9 +186,9 @@ project's live-sync docs) — no per-site env vars required.
   delay — deliberately low-load, not a fast scraper.
 - `respectRobotsTxt` defaults to `true` and is enforced per-request (fetches
   `robots.txt` once per run, skips disallowed paths — verified in testing).
-- `renderJs` (headless browser) defaults to **off**. Only turn it on for a
-  site that genuinely needs JS to render listings — it costs meaningfully
-  more Apify compute credit per page, and this project already ran a whole
-  monthly credit allowance dry once.
+- `crawlerMode` defaults to `cheerio` (cheapest). Only step up to
+  `playwright` or `playwright-stealth` for a site that actually needs it —
+  each step costs meaningfully more Apify compute credit per page, and this
+  project already ran a whole monthly credit allowance dry once already.
 - Keep `maxItems` and `maxCrawlPages` modest, and test each site manually
   before adding it to a daily scheduled sync.

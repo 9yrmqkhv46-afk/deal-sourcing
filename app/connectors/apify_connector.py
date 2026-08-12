@@ -47,7 +47,7 @@ _TEXT_FIELD_GROUPS: tuple[tuple[str, ...], ...] = (
     ("description", "summary", "body", "details"),
     ("price", "askingPrice", "asking_price"),
     ("revenue", "turnover"),
-    ("profit", "ebitda", "netProfit"),
+    ("profit", "ebitda", "netProfit", "cashflow"),
     ("location", "state", "suburb", "address"),
     ("sector", "industry", "category"),
 )
