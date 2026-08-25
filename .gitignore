@@ -28,3 +28,8 @@ htmlcov/
 # Local SQLite database (dev default; production uses DATABASE_URL)
 *.db
 *.db-journal
+
+# Environment / secrets - never commit these
+.env
+.env.*
+!.env.example

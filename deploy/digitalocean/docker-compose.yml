@@ -1,0 +1,16 @@
+# Runs deal-sourcing on a single DigitalOcean Droplet. Host Nginx (see
+# nginx.conf.template) reverse-proxies to this on localhost:8000.
+#
+# Usage: docker compose --env-file .env up -d --build
+# (run from this directory — deploy/digitalocean/)
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
