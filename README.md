@@ -38,6 +38,7 @@ Each `deal` embeds a `thesis_match` with the five tri-state filters, an
 ```
 app/          FastAPI app + pure pipeline (ingestion, routing, handlers,
               normalizer, scoring, contacts, assembler, validator, pipeline)
+              plus extraction.py (PDF/PPTX -> text) and db.py (persistence)
 static/       Dashboard (index.html, app.js, styles.css) — no build step
 tests/        pytest unit tests + hypothesis property tests (P1–P17)
 requirements.txt, render.yaml, Procfile, .gitignore
@@ -60,6 +61,13 @@ Then open <http://localhost:8000> and click **Load sample data**.
 
 - `GET  /` — dashboard
 - `POST /api/process` — body `{ "batch": [ ...source items... ], "config": { ...overrides? } }` → strict JSON output
+- `POST /api/upload` — multipart form upload, field `file` (`.pdf` or `.pptx`). Extracts the
+  document's text, runs it through the same pipeline as `/api/process` (as a single-item
+  batch, `source_type: "document_upload"`), **stores the result in the database**, and returns
+  the usual strict JSON output plus a `document_id`.
+- `GET  /api/documents` — list previously uploaded documents (filename, upload time, deal count).
+- `GET  /api/documents/{document_id}` — a stored document's metadata + every deal found in it.
+- `GET  /api/deals` — list deals stored across all uploads (optional `?classification=core_thesis`).
 - `GET  /api/sample` — bundled demo batch
 - `GET  /api/health` — liveness probe
 
@@ -71,6 +79,38 @@ curl -s http://localhost:8000/api/sample \
   | curl -s -X POST http://localhost:8000/api/process \
        -H 'Content-Type: application/json' --data-binary @-
 ```
+
+## Document upload &amp; storage
+
+Upload a Confidential Information Memorandum, teaser or pitch deck (`.pdf` / `.pptx`) via
+the dashboard's **Upload PDF / PPTX** button, or directly:
+
+```bash
+curl -s -F "file=@teaser.pdf" http://localhost:8000/api/upload
+```
+
+The uploaded file's text is extracted locally (no outbound network access, same as the rest
+of the pipeline), run through the existing deterministic scoring pipeline, and both the raw
+extracted text and the resulting deals/companies/founders/contacts are saved to the database
+so they can be looked up again later — via the dashboard's "Uploaded documents" panel, or
+`GET /api/documents` / `GET /api/documents/{id}` / `GET /api/deals`.
+
+Legacy binary `.ppt` files aren't supported (only `.pptx`) — export/save as `.pptx` first.
+Scanned/image-only PDFs with no embedded text layer will return a 422 (nothing to extract).
+
+### Database
+
+Storage uses SQLAlchemy against `DATABASE_URL`:
+
+- **Not set** (local dev / a quick demo): falls back to a local SQLite file, `./deals.db`.
+- **Set to a Postgres URL** (production): use a managed Postgres database so uploads survive
+  redeploys — a web service's local disk (including a SQLite file on it) is wiped on every
+  redeploy/restart on both Render and DigitalOcean App Platform.
+
+`render.yaml` provisions a free Render Postgres database and wires its connection string into
+`DATABASE_URL` automatically. On DigitalOcean App Platform, add a Dev/Managed Database
+component to the app and set `DATABASE_URL` to its connection string (App Platform can inject
+this for you when the database is attached to the app).
 
 ## Run the tests
 

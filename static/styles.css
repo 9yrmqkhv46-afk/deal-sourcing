@@ -55,6 +55,8 @@ body {
 }
 .btn:hover { border-color: var(--accent); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-small { padding: 5px 10px; font-size: 12px; }
+.upload-btn { display: inline-flex; align-items: center; }
 
 main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; }
 
@@ -134,3 +136,13 @@ tbody tr:hover { background: var(--panel-2); }
 .app-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; }
 .hidden, [hidden] { display: none !important; }
 .explanation { color: var(--muted); font-size: 12px; margin-top: 4px; max-width: 520px; }
+
+.entity-empty { color: var(--muted); font-size: 13px; }
+.entity-list li.document-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.document-row .entity-name { cursor: pointer; }
+.document-row .entity-name:hover { color: var(--accent); }
+.deal-count-pill {
+  display: inline-block; min-width: 22px; text-align: center;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: var(--panel-2); color: var(--muted);
+}

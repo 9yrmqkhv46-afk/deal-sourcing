@@ -16,6 +16,10 @@
       </div>
     </div>
     <div class="actions">
+      <label class="btn btn-primary upload-btn">
+        Upload PDF / PPTX
+        <input id="upload-input" type="file" accept=".pdf,.pptx" hidden />
+      </label>
       <button id="load-sample" class="btn btn-primary">Load sample data</button>
       <button id="run-batch" class="btn">Process batch</button>
     </div>
@@ -29,6 +33,16 @@
           placeholder='[{"source_name": "scaling.com.au", "source_type": "marketplace", "raw_text": "..."}]'></textarea>
         <p id="status" class="status"></p>
       </details>
+    </section>
+
+    <section id="documents-section" class="panel">
+      <div class="panel-head">
+        <h2>Uploaded documents</h2>
+        <button id="refresh-documents" class="btn btn-small">Refresh</button>
+      </div>
+      <ul id="documents-list" class="entity-list">
+        <li class="entity-empty">No documents uploaded yet — use &ldquo;Upload PDF / PPTX&rdquo; above.</li>
+      </ul>
     </section>
 
     <section id="summary-cards" class="summary-cards" hidden>

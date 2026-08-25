@@ -24,3 +24,7 @@ htmlcov/
 *.swp
 .idea/
 .vscode/
+
+# Local SQLite database (dev default; production uses DATABASE_URL)
+*.db
+*.db-journal

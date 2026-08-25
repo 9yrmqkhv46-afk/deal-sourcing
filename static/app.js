@@ -223,5 +223,113 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// --- Document upload (PDF / PPTX) -----------------------------------------
+
+async function uploadFile(file) {
+  setStatus("Uploading " + file.name + "...");
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const res = await fetch("/api/upload", { method: "POST", body: form });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || "HTTP " + res.status);
+    }
+    state.data = await res.json();
+    render();
+    setStatus("Processed " + file.name + " — stored for future reference.", "ok");
+    await loadDocuments();
+  } catch (err) {
+    setStatus("Upload failed: " + err.message, "error");
+  }
+}
+
+async function loadDocuments() {
+  try {
+    const res = await fetch("/api/documents");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const { documents } = await res.json();
+    renderDocuments(documents);
+  } catch (err) {
+    setStatus("Failed to load documents: " + err.message, "error");
+  }
+}
+
+async function openDocument(id) {
+  setStatus("Loading document...");
+  try {
+    const res = await fetch("/api/documents/" + encodeURIComponent(id));
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const detail = await res.json();
+
+    // The list view only needs the flattened deal_records columns (not the
+    // full companies/founders/contacts detail, which lives in each row's
+    // stored deal_json) — synthesize a matching companies[] entry per deal
+    // so the existing companyName() lookup keeps working unmodified.
+    const deals = detail.deals.map((d, i) => ({
+      deal_id: d.deal_id,
+      company_id: "doc_company_" + i,
+      title: d.title || "(untitled)",
+      source_type: "document_upload",
+      deal_size_bucket: "unknown",
+      thesis_match: { overall_score: d.overall_score, classification: d.classification, explanation: "" },
+    }));
+    const companies = detail.deals.map((d, i) => ({
+      company_id: "doc_company_" + i,
+      name: d.company_name || "Unknown company",
+    }));
+    const countBy = (cls) => detail.deals.filter((d) => d.classification === cls).length;
+
+    state.data = {
+      deals,
+      companies,
+      founders: [],
+      contacts: [],
+      summary: {
+        core_thesis_deal_count: countBy("core_thesis"),
+        adjacent_thesis_deal_count: countBy("adjacent_thesis"),
+        reject_count: countBy("reject"),
+        top_contacts_for_outreach: [],
+      },
+    };
+    render();
+    setStatus("Showing stored deals from " + detail.filename + ".", "ok");
+  } catch (err) {
+    setStatus("Failed to open document: " + err.message, "error");
+  }
+}
+
+function renderDocuments(documents) {
+  const list = $("#documents-list");
+  if (!documents.length) {
+    list.innerHTML = '<li class="entity-empty">No documents uploaded yet — use &ldquo;Upload PDF / PPTX&rdquo; above.</li>';
+    return;
+  }
+  list.innerHTML = documents
+    .map((d) => {
+      const when = new Date(d.uploaded_at).toLocaleString();
+      return `<li class="document-row">
+        <div>
+          <div class="entity-name" data-doc-id="${escapeHtml(d.id)}">${escapeHtml(d.filename)}</div>
+          <div class="entity-meta">${escapeHtml(when)}</div>
+        </div>
+        <span class="deal-count-pill">${d.deal_count} deal${d.deal_count === 1 ? "" : "s"}</span>
+      </li>`;
+    })
+    .join("");
+  list.querySelectorAll("[data-doc-id]").forEach((el) => {
+    el.addEventListener("click", () => openDocument(el.dataset.docId));
+  });
+}
+
+$("#upload-input").addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (file) uploadFile(file);
+});
+$("#refresh-documents").addEventListener("click", loadDocuments);
+
 $("#load-sample").addEventListener("click", loadSample);
 $("#run-batch").addEventListener("click", runFromTextarea);
+
+loadDocuments();
